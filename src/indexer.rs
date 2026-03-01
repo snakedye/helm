@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
-use eupp_core::TryAsRef;
-use eupp_core::ledger::{Indexer, Ledger};
+use helm_core::TryAsRef;
+use helm_core::ledger::{Indexer, Ledger};
 
 /// A runtime-polymorphic wrapper over two [`Indexer`] implementations.
 ///

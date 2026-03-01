@@ -1,13 +1,13 @@
 mod api;
 mod indexer;
 
-use eupp_core::{
+use helm_core::{
     Block, MAX_BLOCK_SIZE, Output, SecretKey, Transaction, Version, VirtualSize, commitment,
     ledger::{Indexer, Query},
     miner,
 };
-use eupp_db::{FileStore, RedbIndexer};
-use eupp_net::{Config, EuppNode, RpcClient, SimpleMempool, SyncHandle};
+use helm_db::{FileStore, RedbIndexer};
+use helm_net::{Config, EuppNode, RpcClient, SimpleMempool, SyncHandle};
 use indexer::NodeStore;
 use rand::{TryRngCore, rngs::OsRng};
 use std::{net::SocketAddr, time::Duration};
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    info!("EUPP node starting...");
+    info!("HELM node starting...");
 
     // Create a config
     let config = Config::from_env()?;

@@ -10,7 +10,7 @@
 //!   fetching block summaries.
 
 use ethnum::U256;
-use eupp_core::{
+use helm_core::{
     ledger::{BlockMetadata, Query},
     *,
 };

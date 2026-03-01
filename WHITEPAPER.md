@@ -1,12 +1,12 @@
-# Experimental UTXO Payment Protocol (EUPP)
+# Experimental UTXO Payment Protocol (HELM)
 
 ## 1. Abstract
 
-EUPP is a compact, experimental UTXO ledger and reference node designed to explore programmable outputs and an alternative PoW construction. Its primary innovations are: the Lead UTXO (LUTXO) — a single, mutable UTXO that represents the mint pool; a Chained Mask proof-of-work that lets miners encode future difficulty; and a stack-based virtual machine that enables expressive spending conditions. The goal is a simple, auditable economic model and an expressive, verifiable transaction environment.
+HELM is a compact, experimental UTXO ledger and reference node designed to explore programmable outputs and an alternative PoW construction. Its primary innovations are: the Lead UTXO (LUTXO) — a single, mutable UTXO that represents the mint pool; a Chained Mask proof-of-work that lets miners encode future difficulty; and a stack-based virtual machine that enables expressive spending conditions. The goal is a simple, auditable economic model and an expressive, verifiable transaction environment.
 
 ## 2. UTXO model & transaction rules
 
-EUPP follows the UTXO model: state is a set of unspent outputs, and transactions consume outputs (inputs) and produce new outputs.
+HELM follows the UTXO model: state is a set of unspent outputs, and transactions consume outputs (inputs) and produce new outputs.
 
 ### 2.1 Transaction structure
 
@@ -26,9 +26,9 @@ $$ S_{prev} - Reward \leq S_{next} \leq S_{prev} + \sum Fees $$
 
 Fees are the difference between input and output totals for non-mining transactions in a block; miners collect fees and may roll them back into the LUTXO to replenish the mint pool.
 
-## 3. Programmability: the EUPP VM
+## 3. Programmability: the HELM VM
 
-EUPP supports multiple script/logic versions:
+HELM supports multiple script/logic versions:
 
 - v1: simple public-key based spending (P2PKH-style).
 - v2: programmable bytecode for richer spending conditions.
@@ -45,7 +45,7 @@ These capabilities allow common primitives (multisig, timelocks, atomic swap pat
 
 ## 4. Consensus: Chained Mask Proof-of-Work
 
-EUPP defines mining as a mask-based proof: miners must produce a candidate that satisfies constraints encoded by a mask. Consensus is expressed through spending and creating the LUTXO within the transaction graph rather than a separate header-only construction.
+HELM defines mining as a mask-based proof: miners must produce a candidate that satisfies constraints encoded by a mask. Consensus is expressed through spending and creating the LUTXO within the transaction graph rather than a separate header-only construction.
 
 ### 4.1 Mask concept and mining solution
 

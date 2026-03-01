@@ -135,7 +135,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "eupp-core"
+name = "helm-core"
 version = "0.1.0"
 dependencies = [
  "blake2",

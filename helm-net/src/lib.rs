@@ -11,7 +11,7 @@ use crate::protocol::{
 pub use config::Config;
 use const_hex as hex;
 use ethnum::U256;
-use eupp_core::{
+use helm_core::{
     ledger::{Indexer, IndexerExt, Ledger, LedgerExt, Query},
     *,
 };
@@ -680,7 +680,7 @@ impl<I: Send + Sync + 'static, M: Mempool + Send + Sync + 'static> EuppNode<I, M
                         key.public().to_peer_id(),
                     )?,
                     sync: request_response::cbor::Behaviour::new(
-                        [(StreamProtocol::new("/eupp/sync/1"), ProtocolSupport::Full)],
+                        [(StreamProtocol::new("/helm/sync/1"), ProtocolSupport::Full)],
                         Default::default(),
                     ),
                 })

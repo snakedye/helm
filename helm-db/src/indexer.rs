@@ -6,7 +6,7 @@ use std::{
 };
 
 use ethnum::U256;
-use eupp_core::{
+use helm_core::{
     ledger::{BlockMetadata, Cursor, IndexerExt, Ledger},
     mask_difficulty, *,
 };
@@ -296,12 +296,12 @@ impl<S, Fs> RedbIndexer<S, Fs> {
     }
 }
 
-impl<F, T> eupp_core::ledger::Indexer for RedbIndexer<F, T>
+impl<F, T> helm_core::ledger::Indexer for RedbIndexer<F, T>
 where
     T: TryAsRef<FileStore>,
     F: Fn(&Output) -> bool,
 {
-    fn add_block(&mut self, block: &eupp_core::Block) -> Result<(), BlockError> {
+    fn add_block(&mut self, block: &helm_core::Block) -> Result<(), BlockError> {
         let write_tx = self.db.begin_write().unwrap();
 
         {
@@ -412,7 +412,7 @@ where
         let table = read_tx.open_table(UTXO_TABLE).ok()?;
         self.get(&table, output_id, |output| output)
     }
-    fn query_outputs(&self, query: &eupp_core::ledger::Query) -> Vec<(OutputId, Output)> {
+    fn query_outputs(&self, query: &helm_core::ledger::Query) -> Vec<(OutputId, Output)> {
         let read_tx = self.db.begin_read().unwrap();
         let address_table = read_tx.open_multimap_table(ADDRESS_TABLE).unwrap();
         let utxo_table = read_tx.open_table(UTXO_TABLE).unwrap();
@@ -484,7 +484,7 @@ mod tests {
 
     use super::*;
 
-    use eupp_core::ledger::{Indexer, Query};
+    use helm_core::ledger::{Indexer, Query};
     use redb::Database;
     use redb::backends::InMemoryBackend;
 
@@ -657,7 +657,7 @@ mod tests {
 
         // create a temporary file for the ledger
         let mut path = std::env::temp_dir();
-        path.push("eupp-db-indexer-get-block-test.dat");
+        path.push("helm-db-indexer-get-block-test.dat");
         // ensure clean
         let _ = std::fs::remove_file(&path);
 

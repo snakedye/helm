@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use const_hex as hex;
-use eupp_core::{Hash, TransactionHash, commitment, keypair};
-use eupp_core::{Input, Output, OutputId, Transaction, ledger::Query, sighash};
+use helm_core::{Hash, TransactionHash, commitment, keypair};
+use helm_core::{Input, Output, OutputId, Transaction, ledger::Query, sighash};
 use std::time::Duration;
 
 /// A CLI for interacting with the Eupp node via its HTTP REST API.

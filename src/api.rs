@@ -5,9 +5,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use eupp_core::{Output, OutputId, Transaction, ledger::Query};
-use eupp_net::protocol::{self as protocol, RpcError};
-use eupp_net::{RpcClient, protocol::BlockSummary};
+use helm_core::{Output, OutputId, Transaction, ledger::Query};
+use helm_net::protocol::{self as protocol, RpcError};
+use helm_net::{RpcClient, protocol::BlockSummary};
 use serde::Serialize;
 
 /// Newtype wrapper around [`RpcError`] so we can implement [`IntoResponse`]
