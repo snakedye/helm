@@ -112,10 +112,10 @@ impl std::fmt::Display for ExecError {
 }
 
 /// VM runtime holding a reference to a indexer.
-pub struct Vm<'a, L> {
+pub struct Vm<'a, I> {
     input_index: usize,
     transaction: &'a Transaction,
-    indexer: &'a L,
+    indexer: &'a I,
 }
 
 /// Represents a value on the VM stack.
@@ -161,15 +161,25 @@ impl<'a> From<u8> for StackValue<'a> {
     }
 }
 
-impl<'a> StackValue<'a> {
-    fn to_int(&self) -> Option<u64> {
+impl<'a> From<bool> for StackValue<'a> {
+    fn from(value: bool) -> Self {
+        StackValue::U8(value as u8)
+    }
+}
+
+impl TryInto<u64> for StackValue<'_> {
+    type Error = Self;
+    fn try_into(self) -> Result<u64, Self> {
         match self {
-            StackValue::U8(b) => Some(*b as u64),
-            StackValue::U32(int) => Some(*int as u64),
-            StackValue::U64(int) => Some(*int as u64),
-            _ => None,
+            StackValue::U8(b) => Ok(b as u64),
+            StackValue::U32(int) => Ok(int as u64),
+            StackValue::U64(int) => Ok(int as u64),
+            _ => Err(self),
         }
     }
+}
+
+impl<'a> StackValue<'a> {
     /// Returns the length of the stack value in bytes.
     fn len(&self) -> usize {
         match self {
@@ -242,11 +252,23 @@ impl Default for OwnedStackValue {
     }
 }
 
-type VmStack<'a, 'b> = Stack<'a, StackValue<'b>>;
+impl OwnedStackValue {
+    fn borrow<'a>(&'a self) -> StackValue<'a> {
+        match self {
+            OwnedStackValue::U8(val) => StackValue::U8(*val),
+            OwnedStackValue::U32(val) => StackValue::U32(*val),
+            OwnedStackValue::U64(val) => StackValue::U64(*val),
+            OwnedStackValue::Bytes(val) => StackValue::Bytes(val),
+        }
+    }
+}
 
-impl<'a, L: Indexer> Vm<'a, L> {
+type VmStack<'a, 'b> = Stack<'a, StackValue<'b>>;
+type VmRegisters = [OwnedStackValue; 256];
+
+impl<'a, I: Indexer> Vm<'a, I> {
     /// Create a VM that references the provided indexer.
-    pub fn new(indexer: &'a L, input_index: usize, transaction: &'a Transaction) -> Self {
+    pub fn new(indexer: &'a I, input_index: usize, transaction: &'a Transaction) -> Self {
         Vm {
             indexer,
             input_index,
@@ -267,46 +289,51 @@ impl<'a, L: Indexer> Vm<'a, L> {
     /// Returns a `u128` representing the exit code of the VM stack (top
     /// element first) after execution completes successfully. On error, a
     /// `VmError` is returned.
-    pub fn run(&'a self, code: &'a [u8]) -> Result<OwnedStackValue, ExecError> {
+    pub fn run(
+        &'a self,
+        code: &'a [u8],
+        registers: &mut VmRegisters,
+    ) -> Result<OwnedStackValue, ExecError> {
         let scanner = Scanner::new(code);
         // start with an empty persistent stack
         let stack: VmStack = Stack::new();
 
         // iterate and execute instructions
         let mut iter = scanner;
-        let exit_code = self.exec(&mut iter, stack)?;
+        let exit_code = self.exec(&mut iter, stack, registers)?;
 
         Ok(exit_code)
     }
 
     /// Execute the provided bytecode.
     // This function needs a huge refactor to make it more readable and maintainable.
-    fn exec<'i, I>(
+    fn exec<'i, S>(
         &self,
-        scanner: &'i mut I,
+        iter: &'i mut S,
         mut stack: VmStack,
+        registers: &mut VmRegisters,
     ) -> Result<OwnedStackValue, ExecError>
     where
-        I: Iterator<Item = Op<'a>>,
+        S: Iterator<Item = Op<'a>>,
     {
-        if let Some(op) = scanner.next() {
+        if let Some(op) = iter.next() {
             return match op {
                 // Literals / stack constants
-                Op::False => return self.exec(scanner, stack.push(0_u8.into())),
-                Op::True => return self.exec(scanner, stack.push(1_u8.into())),
+                Op::False => return self.exec(iter, stack.push(0_u8.into()), registers),
+                Op::True => return self.exec(iter, stack.push(1_u8.into()), registers),
 
                 // Stack manipulation
                 Op::Dup => {
                     // duplicate top item
                     match stack.get() {
-                        Some(&v) => return self.exec(scanner, stack.push(v)),
+                        Some(&v) => return self.exec(iter, stack.push(v), registers),
                         None => Err(ExecError::new(op, &stack)),
                     }
                 }
                 Op::Drop => {
                     // pop top
                     match stack.pop() {
-                        Some((_v, parent)) => return self.exec(scanner, *parent),
+                        Some((_v, parent)) => return self.exec(iter, *parent, registers),
                         None => Err(ExecError::new(op, &stack)),
                     }
                 }
@@ -315,7 +342,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                     if let Some((a, parent1)) = stack.pop() {
                         if let Some((b, parent2)) = parent1.pop() {
                             stack = parent2.push(b);
-                            return self.exec(scanner, stack.push(a));
+                            return self.exec(iter, stack.push(a), registers);
                         } else {
                             Err(ExecError::new(op, &stack))
                         }
@@ -325,16 +352,18 @@ impl<'a, L: Indexer> Vm<'a, L> {
                 }
 
                 // Immediate pushes
-                Op::PushU32(n) => return self.exec(scanner, stack.push(n.into())),
-                Op::PushByte(b) => return self.exec(scanner, stack.push(b.into())),
-                Op::PushBytes(bytes) => return self.exec(scanner, stack.push(bytes.into())),
+                Op::PushU32(n) => return self.exec(iter, stack.push(n.into()), registers),
+                Op::PushByte(b) => return self.exec(iter, stack.push(b.into()), registers),
+                Op::PushBytes(bytes) => {
+                    return self.exec(iter, stack.push(bytes.into()), registers);
+                }
 
                 Op::ReadByte => match stack.pop() {
                     Some((value, parent)) => {
                         let mut buffer = [0u8; 1];
                         let bytes_written = value.copy_from_self(&mut buffer);
                         if bytes_written > 0 {
-                            self.exec(scanner, parent.push(buffer[0].into()))
+                            self.exec(iter, parent.push(buffer[0].into()), registers)
                         } else {
                             Err(ExecError::new(op, &stack))
                         }
@@ -349,7 +378,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                             Err(ExecError::new(op, &stack))
                         } else {
                             let value = u32::from_be_bytes(buffer);
-                            self.exec(scanner, parent.push(value.into()))
+                            self.exec(iter, parent.push(value.into()), registers)
                         }
                     }
                     None => Err(ExecError::new(op, &stack)),
@@ -362,7 +391,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                             Err(ExecError::new(op, &stack))
                         } else {
                             let value = u64::from_be_bytes(buffer);
-                            self.exec(scanner, parent.push(value.into()))
+                            self.exec(iter, parent.push(value.into()), registers)
                         }
                     }
                     None => Err(ExecError::new(op, &stack)),
@@ -374,34 +403,42 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         .indexer
                         .get_output(&self.get_input().output_id)
                         .ok_or(ExecError::new(op, &stack))?;
-                    return self.exec(scanner, stack.push(utxo.amount.into()));
+                    return self.exec(iter, stack.push(utxo.amount.into()), registers);
                 }
                 Op::SelfData => {
                     let utxo = self
                         .indexer
                         .get_output(&self.get_input().output_id)
                         .ok_or(ExecError::new(op, &stack))?;
-                    return self.exec(scanner, stack.push(StackValue::Bytes(&utxo.data)));
+                    return self.exec(iter, stack.push(StackValue::Bytes(&utxo.data)), registers);
                 }
                 Op::SelfComm => {
                     let utxo = self
                         .indexer
                         .get_output(&self.get_input().output_id)
                         .ok_or(ExecError::new(op, &stack))?;
-                    return self.exec(scanner, stack.push(StackValue::Bytes(&utxo.commitment)));
+                    return self.exec(
+                        iter,
+                        stack.push(StackValue::Bytes(&utxo.commitment)),
+                        registers,
+                    );
                 }
                 // The opcode should contain the index of the output to push.
                 Op::OutAmt(idx) => {
                     let output = &self.get_outputs()[idx as usize];
-                    return self.exec(scanner, stack.push(output.amount.into()));
+                    return self.exec(iter, stack.push(output.amount.into()), registers);
                 }
                 Op::OutData(idx) => {
                     let output = &self.get_outputs()[idx as usize];
-                    return self.exec(scanner, stack.push(StackValue::Bytes(&output.data)));
+                    return self.exec(iter, stack.push(StackValue::Bytes(&output.data)), registers);
                 }
                 Op::OutComm(idx) => {
                     let output = &self.get_outputs()[idx as usize];
-                    return self.exec(scanner, stack.push(StackValue::Bytes(&output.commitment)));
+                    return self.exec(
+                        iter,
+                        stack.push(StackValue::Bytes(&output.commitment)),
+                        registers,
+                    );
                 }
 
                 // Chain state
@@ -410,7 +447,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         .indexer
                         .get_last_block_metadata()
                         .map_or(0, |meta| meta.available_supply);
-                    return self.exec(scanner, stack.push(supply.into()));
+                    return self.exec(iter, stack.push(supply.into()), registers);
                 }
                 Op::SelfSupply => {
                     let supply = self
@@ -418,14 +455,14 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         .get_block_from_output(&self.get_input().output_id)
                         .and_then(|hash| self.indexer.get_block_metadata(&hash))
                         .map_or(0, |meta| meta.available_supply);
-                    return self.exec(scanner, stack.push(supply.into()));
+                    return self.exec(iter, stack.push(supply.into()), registers);
                 }
                 Op::Height => {
                     let height = self
                         .indexer
                         .get_last_block_metadata()
                         .map_or(0, |meta| meta.height);
-                    return self.exec(scanner, stack.push(height.into()));
+                    return self.exec(iter, stack.push(height.into()), registers);
                 }
                 Op::SelfHeight => {
                     let height = self
@@ -433,25 +470,28 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         .get_block_from_output(&self.get_input().output_id)
                         .and_then(|hash| self.indexer.get_block_metadata(&hash))
                         .map_or(0, |meta| meta.height);
-                    return self.exec(scanner, stack.push(height.into()));
+                    return self.exec(iter, stack.push(height.into()), registers);
                 }
 
                 Op::PushPk => {
                     return self.exec(
-                        scanner,
+                        iter,
                         stack.push(self.get_input().public_key.as_slice().into()),
+                        registers,
                     );
                 }
                 Op::PushSig => {
                     return self.exec(
-                        scanner,
+                        iter,
                         stack.push(self.get_input().signature.as_slice().into()),
+                        registers,
                     );
                 }
                 Op::PushWitness => {
                     return self.exec(
-                        scanner,
+                        iter,
                         stack.push(self.get_input().witness.as_slice().into()),
+                        registers,
                     );
                 }
                 Op::SighashAll => {
@@ -459,11 +499,11 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         self.transaction.inputs.iter().map(|input| &input.output_id),
                         &self.transaction.outputs,
                     );
-                    return self.exec(scanner, stack.push(sighash.as_slice().into()));
+                    return self.exec(iter, stack.push(sighash.as_slice().into()), registers);
                 }
                 Op::SighashOut => {
                     let sighash = sighash([], &self.transaction.outputs);
-                    return self.exec(scanner, stack.push(sighash.as_slice().into()));
+                    return self.exec(iter, stack.push(sighash.as_slice().into()), registers);
                 }
 
                 // Crypto & hashing (placeholders)
@@ -481,7 +521,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                                         .map_err(|_| ExecError::new(op, &stack))?;
 
                                 let result = verifying_key.verify(sighash, &signature).is_ok();
-                                return self.exec(scanner, parent3.push((result as u8).into()));
+                                return self.exec(iter, parent3.push(result.into()), registers);
                             } else {
                                 return Err(ExecError::new(op, &stack));
                             }
@@ -496,7 +536,11 @@ impl<'a, L: Indexer> Vm<'a, L> {
                     Some((value, parent)) => {
                         let hash = blake2::Blake2s256::digest(&value.to_bytes());
                         let hash_bytes: [u8; 32] = hash.try_into().unwrap();
-                        return self.exec(scanner, parent.push(StackValue::Bytes(&hash_bytes)));
+                        return self.exec(
+                            iter,
+                            parent.push(StackValue::Bytes(&hash_bytes)),
+                            registers,
+                        );
                     }
                     None => Err(ExecError::new(op, &stack)),
                 },
@@ -506,7 +550,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                     Some((a, parent1)) => match parent1.pop() {
                         Some((b, parent2)) => {
                             let res = (a == b) as u8;
-                            return self.exec(scanner, parent2.push(res.into()));
+                            return self.exec(iter, parent2.push(res.into()), registers);
                         }
                         None => return Err(ExecError::new(op, &stack)),
                     },
@@ -515,10 +559,10 @@ impl<'a, L: Indexer> Vm<'a, L> {
                 // Pops a,b pushes 1 if b>a (consistent with earlier spec)
                 Op::Greater => match stack.pop() {
                     Some((a, parent1)) => match parent1.pop() {
-                        Some((b, parent2)) => match (a.to_int(), b.to_int()) {
-                            (Some(a), Some(b)) => {
+                        Some((b, parent2)) => match (a.try_into(), b.try_into()) {
+                            (Ok(a), Ok::<u64, _>(b)) => {
                                 let res = (b > a) as u8;
-                                return self.exec(scanner, parent2.push(res.into()));
+                                return self.exec(iter, parent2.push(res.into()), registers);
                             }
                             _ => return Err(ExecError::new(op, &stack)),
                         },
@@ -534,8 +578,9 @@ impl<'a, L: Indexer> Vm<'a, L> {
                                 return Err(ExecError::new(op, &stack));
                             }
                             return self.exec(
-                                scanner,
+                                iter,
                                 parent2.push(StackValue::Stream(stack.iter().take(2))),
+                                registers,
                             );
                         }
                     }
@@ -546,14 +591,20 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         match a {
                             StackValue::Bytes(bytes) => {
                                 let (left, right) = bytes.split_at(index as usize);
-                                return self
-                                    .exec(scanner, parent.push(left.into()).push(right.into()));
+                                return self.exec(
+                                    iter,
+                                    parent.push(left.into()).push(right.into()),
+                                    registers,
+                                );
                             }
                             StackValue::Stream { .. } => {
                                 let bytes = a.to_bytes();
                                 let (left, right) = bytes.split_at(index as usize);
-                                return self
-                                    .exec(scanner, parent.push(left.into()).push(right.into()));
+                                return self.exec(
+                                    iter,
+                                    parent.push(left.into()).push(right.into()),
+                                    registers,
+                                );
                             }
                             _ => Err(ExecError::new(op, &stack)),
                         }
@@ -566,11 +617,11 @@ impl<'a, L: Indexer> Vm<'a, L> {
                     match stack.pop() {
                         Some((a, parent1)) => match parent1.pop() {
                             Some((b, parent2)) => {
-                                let sum = match (a.to_int(), b.to_int()) {
-                                    (Some(a), Some(b)) => (b).wrapping_add(a),
+                                let sum = match (a.try_into(), b.try_into()) {
+                                    (Ok(a), Ok::<u64, _>(b)) => b.wrapping_add(a),
                                     _ => return Err(ExecError::new(op, &stack)),
                                 };
-                                return self.exec(scanner, parent2.push(sum.into()));
+                                return self.exec(iter, parent2.push(sum.into()), registers);
                             }
                             None => return Err(ExecError::new(op, &stack)),
                         },
@@ -582,11 +633,11 @@ impl<'a, L: Indexer> Vm<'a, L> {
                     match stack.pop() {
                         Some((a, parent1)) => match parent1.pop() {
                             Some((b, parent2)) => {
-                                let sum = match (a.to_int(), b.to_int()) {
-                                    (Some(a), Some(b)) => b.wrapping_sub(a),
+                                let diff = match (a.try_into(), b.try_into()) {
+                                    (Ok(a), Ok::<u64, _>(b)) => b.wrapping_sub(a),
                                     _ => return Err(ExecError::new(op, &stack)),
                                 };
-                                return self.exec(scanner, parent2.push(sum.into()));
+                                return self.exec(iter, parent2.push(diff.into()), registers);
                             }
                             None => return Err(ExecError::new(op, &stack)),
                         },
@@ -601,7 +652,7 @@ impl<'a, L: Indexer> Vm<'a, L> {
                         Some((StackValue::U32(0), _)) | Some((StackValue::U8(0), _)) => {
                             return Err(ExecError::new(op, &stack));
                         }
-                        Some((_, parent)) => return self.exec(scanner, *parent),
+                        Some((_, parent)) => return self.exec(iter, *parent, registers),
                         None => return Err(ExecError::new(op, &stack)),
                     }
                 }
@@ -610,20 +661,33 @@ impl<'a, L: Indexer> Vm<'a, L> {
                     match stack.pop() {
                         Some((cond, parent)) => {
                             if matches!(cond, StackValue::U32(0) | StackValue::U8(0)) {
-                                scanner.find(|op| matches!(op, Op::EndIf));
+                                iter.find(|op| matches!(op, Op::EndIf));
                                 // Skip the if block and recurse with the parent stack.
-                                return self.exec(scanner, stack);
+                                return self.exec(iter, stack, registers);
                             } else if matches!(cond, StackValue::Bytes(_)) {
                                 return Err(ExecError::new(op, &stack));
                             } else {
                                 // Recurse with the parent stack.
-                                return self.exec(scanner, *parent);
+                                return self.exec(iter, *parent, registers);
                             }
                         }
                         None => return Err(ExecError::new(op, &stack)),
                     }
                 }
-                Op::EndIf => return self.exec(scanner, stack),
+                // Register operations
+                Op::Load(reg) => {
+                    let value = registers[reg as usize].clone();
+                    return self.exec(iter, stack.push(value.borrow()), registers);
+                }
+                Op::Store(reg) => match stack.pop() {
+                    Some((value, parent)) => {
+                        registers[reg as usize] = value.to_owned();
+                        return self.exec(iter, *parent, registers);
+                    }
+                    None => return Err(ExecError::new(op, &stack)),
+                },
+
+                Op::EndIf => return self.exec(iter, stack, registers),
             };
         } else {
             return Ok(stack.get().map(StackValue::to_owned).unwrap_or_default());
@@ -697,13 +761,20 @@ mod tests {
         Vm::new(indexer, input, transaction)
     }
 
+    fn default_registers() -> VmRegisters {
+        std::array::from_fn(|_| OwnedStackValue::default())
+    }
+
     #[test]
     fn test_op_false() {
         let indexer = MockLedger::default();
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_FALSE];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -712,7 +783,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_TRUE];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -721,7 +795,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 123, OP_DUP, OP_ADD];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(246)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(246))
+        );
     }
 
     #[test]
@@ -730,7 +807,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 123, OP_PUSH_BYTE, 200, OP_DROP];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(123)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(123))
+        );
     }
 
     #[test]
@@ -739,7 +819,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 200, OP_PUSH_BYTE, 123, OP_SWAP, OP_SUB];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(200 - 123)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(200 - 123))
+        );
     }
 
     #[test]
@@ -749,7 +832,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
         let val = 12345u32.to_le_bytes();
         let code = [OP_PUSH_U32, val[0], val[1], val[2], val[3]];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U32(12345)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U32(12345))
+        );
     }
 
     #[test]
@@ -759,7 +845,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
         let val = 100u8;
         let code = [OP_PUSH_BYTE, val];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(val)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(val))
+        );
     }
 
     #[test]
@@ -778,7 +867,10 @@ mod tests {
         let transaction = Transaction::new(vec![input], vec![]);
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_SELF_AMT];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(100)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(100))
+        );
     }
 
     #[test]
@@ -800,7 +892,10 @@ mod tests {
         let transaction = Transaction::new(vec![input], vec![]);
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_SELF_DATA, OP_DUP, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -823,10 +918,16 @@ mod tests {
         let transaction = Transaction::new(vec![input], new_outputs);
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_SELF_COMM, OP_DUP, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
 
         let code_vs_data = [OP_SELF_COMM, OP_SELF_DATA, OP_EQUAL];
-        assert_eq!(vm.run(&code_vs_data), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code_vs_data, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -846,7 +947,10 @@ mod tests {
 
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [u8::from(Op::OutAmt(0)), 0];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(200)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(200))
+        );
     }
 
     #[test]
@@ -869,7 +973,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [u8::from(Op::OutData(0)), 0, OP_DUP, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -892,7 +999,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [u8::from(Op::OutComm(0)), 0, OP_DUP, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -913,9 +1023,15 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [OP_PUSH_SUPPLY];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(100_000)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(100_000))
+        );
         let code = [OP_SELF_HEIGHT];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U32(50)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U32(50))
+        );
     }
 
     #[test]
@@ -925,9 +1041,15 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [OP_PUSH_SUPPLY];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(0))
+        );
         let code = [OP_SELF_HEIGHT];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U32(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U32(0))
+        );
     }
 
     #[test]
@@ -959,7 +1081,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [OP_SELF_SUPPLY];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(100_000)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(100_000))
+        );
     }
 
     #[test]
@@ -979,7 +1104,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [OP_PUSH_PK, OP_DUP, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -1000,7 +1128,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [OP_PUSH_SIG, OP_DUP, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -1020,7 +1151,10 @@ mod tests {
         let indexer = MockLedger::default();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = check_sig_script();
-        assert_eq!(vm.run(&code[..4]), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code[..4], &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -1048,7 +1182,10 @@ mod tests {
         let indexer = MockLedger::default();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = check_sig_script();
-        assert_eq!(vm.run(&code[0..4]), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code[0..4], &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -1073,7 +1210,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
 
         let code = [OP_SELF_DATA, OP_HASH_B2, OP_SELF_COMM, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -1082,13 +1222,22 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 123, OP_PUSH_BYTE, 123, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
 
         let code = [OP_PUSH_BYTE, 123, OP_PUSH_BYTE, 200, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
 
         let code = [OP_PUSH_BYTE, 200, OP_PUSH_BYTE, 123, OP_EQUAL];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -1099,15 +1248,24 @@ mod tests {
 
         // b > a -> 456 > 123
         let code = [OP_PUSH_BYTE, 200, OP_PUSH_BYTE, 123, OP_GREATER];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
 
         // b > a -> 123 > 456
         let code = [OP_PUSH_BYTE, 123, OP_PUSH_BYTE, 200, OP_GREATER];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
 
         // b > a -> 123 > 123
         let code = [OP_PUSH_BYTE, 123, OP_PUSH_BYTE, 123, OP_GREATER];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -1130,7 +1288,10 @@ mod tests {
             val2[3],
             OP_ADD,
         ];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(30)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(30))
+        );
     }
 
     #[test]
@@ -1139,7 +1300,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 30, OP_PUSH_BYTE, 10, OP_SUB];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(20)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(20))
+        );
     }
 
     #[test]
@@ -1148,7 +1312,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 1, OP_VERIFY, OP_TRUE];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
     }
 
     #[test]
@@ -1157,7 +1324,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 0, OP_VERIFY, OP_TRUE];
-        assert_eq!(vm.run(&code).unwrap_err().code, OP_VERIFY);
+        assert_eq!(
+            vm.run(&code, &mut default_registers()).unwrap_err().code,
+            OP_VERIFY
+        );
     }
 
     #[test]
@@ -1166,7 +1336,10 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 200, OP_RETURN, OP_TRUE];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(200)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(200))
+        );
     }
 
     #[test]
@@ -1183,19 +1356,28 @@ mod tests {
 
         let code = [OP_PUSH_BYTE, val, OP_IF, OP_TRUE];
 
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(1))
+        );
 
         // Condition is 0, so OP_TRUE is skipped. The next op is... nothing.
         // It should end with an empty stack, which is an error.
         let val = 0u8;
         let code = [OP_PUSH_BYTE, val, OP_IF, OP_TRUE];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
 
         // Condition is 0, so OP_TRUE is skipped, OP_FALSE is executed.
         let val = 0u8;
         let code = [OP_PUSH_BYTE, val, OP_IF, OP_TRUE, OP_FALSE];
 
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -1221,7 +1403,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
         let script = p2pkh();
 
-        assert_eq!(vm.run(script), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(
+            vm.run(script, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
     }
 
     #[test]
@@ -1251,7 +1436,10 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
         let script = p2pkh();
 
-        assert_eq!(vm.run(&script).unwrap_err().code, OP_VERIFY);
+        assert_eq!(
+            vm.run(&script, &mut default_registers()).unwrap_err().code,
+            OP_VERIFY
+        );
     }
 
     #[test]
@@ -1267,7 +1455,10 @@ mod tests {
             2,
             OP_CAT, // Concatenate the top two byte arrays
         ];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::Bytes(vec![2, 1])));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::Bytes(vec![2, 1]))
+        );
     }
     #[test]
     fn test_op_cat_dos_attack() {
@@ -1284,7 +1475,10 @@ mod tests {
         }
 
         // Expect a stack overflow error due to excessive concatenation
-        assert_eq!(vm.run(&code).unwrap_err().code, OP_CAT);
+        assert_eq!(
+            vm.run(&code, &mut default_registers()).unwrap_err().code,
+            OP_CAT
+        );
     }
 
     #[test]
@@ -1295,7 +1489,7 @@ mod tests {
         transaction.inputs[0].witness = witness_data.to_vec();
         let vm = create_vm(&indexer, 0, &transaction);
 
-        let result = vm.run(&[OP_PUSH_WITNESS]);
+        let result = vm.run(&[OP_PUSH_WITNESS], &mut default_registers());
         assert_eq!(result, Ok(OwnedStackValue::Bytes(witness_data.to_vec())));
     }
 
@@ -1307,7 +1501,7 @@ mod tests {
         transaction.inputs[0].witness = witness_data.to_vec();
         let vm = create_vm(&indexer, 0, &transaction);
 
-        let result = vm.run(&[OP_PUSH_WITNESS, OP_SPLIT, 2]);
+        let result = vm.run(&[OP_PUSH_WITNESS, OP_SPLIT, 2], &mut default_registers());
         assert_eq!(result, Ok(OwnedStackValue::Bytes(vec![0x03, 0x04])));
     }
     #[test]
@@ -1332,7 +1526,10 @@ mod tests {
             OP_READ_U32,
         ];
 
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U32(12345678)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U32(12345678))
+        );
     }
     #[test]
     fn test_op_read_u64() {
@@ -1351,7 +1548,118 @@ mod tests {
             OP_READ_U64,
         ];
 
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(u64::MAX)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U64(u64::MAX))
+        );
+    }
+
+    #[test]
+    fn test_op_store_and_load() {
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+        let mut regs = default_registers();
+        // Push a value, store it in register 0, then load it back.
+        let code = [
+            OP_PUSH_BYTE,
+            0x42, // Push 0x42 onto the stack
+            OP_STORE,
+            0x00, // Pop 0x42 and store it in register 0
+            OP_LOAD,
+            0x00, // Push the value from register 0 back onto the stack
+        ];
+        assert_eq!(vm.run(&code, &mut regs), Ok(OwnedStackValue::U8(0x42)));
+    }
+
+    #[test]
+    fn test_op_registers_persist_across_scripts() {
+        // Verify that the same mutable register array can be reused between
+        // two separate vm.run calls, preserving written values.
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+        let mut regs = default_registers();
+
+        // First script: push 0x99 and store it in register 10.
+        let store_code = [OP_PUSH_BYTE, 0x99, OP_STORE, 0x0A];
+        vm.run(&store_code, &mut regs).unwrap();
+
+        // Second script: load register 10 — must still be 0x99.
+        let load_code = [OP_LOAD, 0x0A];
+        assert_eq!(vm.run(&load_code, &mut regs), Ok(OwnedStackValue::U8(0x99)));
+    }
+
+    #[test]
+    fn test_op_store_and_load_multiple_registers() {
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+        let mut regs = default_registers();
+        // Store two different values in two registers, then load them independently.
+        let code_r0 = [
+            OP_PUSH_BYTE,
+            0x01, // Push 0x01
+            OP_STORE,
+            0x00, // Store 0x01 in register 0
+            OP_PUSH_BYTE,
+            0x02, // Push 0x02
+            OP_STORE,
+            0x01, // Store 0x02 in register 1
+            OP_LOAD,
+            0x00, // Load register 0 → 0x01
+        ];
+        assert_eq!(vm.run(&code_r0, &mut regs), Ok(OwnedStackValue::U8(0x01)));
+
+        // Verify register 1 holds 0x02 by loading it in a fresh script.
+        let code_r1 = [OP_LOAD, 0x01];
+        assert_eq!(vm.run(&code_r1, &mut regs), Ok(OwnedStackValue::U8(0x02)));
+    }
+
+    #[test]
+    fn test_op_load_default_register() {
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+        // Registers are zero-initialised (OwnedStackValue::U8(0)), so loading
+        // from a register that was never written returns U8(0).
+        let code = [OP_LOAD, 0x05];
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0))
+        );
+    }
+
+    #[test]
+    fn test_op_store_empty_stack_fails() {
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+        // Storing when the stack is empty must return an error.
+        let code = [OP_STORE, 0x00];
+        assert!(vm.run(&code, &mut default_registers()).is_err());
+    }
+
+    #[test]
+    fn test_op_store_overwrites_register() {
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+        let mut regs = default_registers();
+        // Storing twice in the same register keeps only the latest value.
+        let code = [
+            OP_PUSH_BYTE,
+            0xAA, // Push 0xAA
+            OP_STORE,
+            0x00, // Store 0xAA in register 0
+            OP_PUSH_BYTE,
+            0xBB, // Push 0xBB
+            OP_STORE,
+            0x00, // Overwrite register 0 with 0xBB
+            OP_LOAD,
+            0x00, // Load register 0 → should be 0xBB
+        ];
+        assert_eq!(vm.run(&code, &mut regs), Ok(OwnedStackValue::U8(0xBB)));
     }
 
     #[test]
@@ -1363,6 +1671,9 @@ mod tests {
         let data = [0xAB];
         let code = [OP_PUSH_BYTE, data[0], OP_READ_BYTE];
 
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0xAB)));
+        assert_eq!(
+            vm.run(&code, &mut default_registers()),
+            Ok(OwnedStackValue::U8(0xAB))
+        );
     }
 }
