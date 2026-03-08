@@ -37,13 +37,9 @@ impl<'a> Scanner<'a> {
     }
 
     fn read_u32_le(&mut self) -> Option<u32> {
-        if self.idx + 4 <= self.bytes.len() {
-            let b0 = self.bytes[self.idx];
-            let b1 = self.bytes[self.idx + 1];
-            let b2 = self.bytes[self.idx + 2];
-            let b3 = self.bytes[self.idx + 3];
+        if let Some(slice) = self.bytes.get(self.idx..self.idx + 4) {
             self.idx += 4;
-            Some(u32::from_le_bytes([b0, b1, b2, b3]))
+            Some(u32::from_le_bytes(slice.try_into().unwrap()))
         } else {
             None
         }
