@@ -6,7 +6,8 @@ that require them (e.g. `OP_PUSH_1`, `OP_PUSH_U32`).
 */
 
 use super::op::{
-    OP_OUT_AMT, OP_OUT_COMM, OP_OUT_DATA, OP_PUSH_BYTE, OP_PUSH_BYTES, OP_PUSH_U32, OP_SPLIT, Op,
+    OP_LOAD, OP_OUT_AMT, OP_OUT_COMM, OP_OUT_DATA, OP_PUSH_BYTE, OP_PUSH_BYTES, OP_PUSH_U32,
+    OP_SPLIT, OP_STORE, Op,
 };
 
 /// An iterator that reads opcodes (and their payloads) from a byte slice.
@@ -104,6 +105,20 @@ impl<'a> Iterator for Scanner<'a> {
                     None
                 }
             },
+            OP_LOAD => match self.read_u8() {
+                Some(v) => Some(Op::Load(v)),
+                None => {
+                    self.idx = self.bytes.len();
+                    None
+                }
+            },
+            OP_STORE => match self.read_u8() {
+                Some(v) => Some(Op::Store(v)),
+                None => {
+                    self.idx = self.bytes.len();
+                    None
+                }
+            },
             OP_PUSH_BYTES => match self.read_u8() {
                 Some(n) => {
                     if self.idx + n as usize <= self.bytes.len() {
@@ -128,6 +143,7 @@ impl<'a> Iterator for Scanner<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::op::Op;
     use super::super::op::r#const::*;
     use super::*;
 
@@ -217,5 +233,47 @@ mod tests {
             None => {}
             other => panic!("expected None, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn scan_load() {
+        let bytes = [OP_LOAD, 0x07];
+        let mut s = Scanner::new(&bytes);
+        assert_eq!(s.next(), Some(Op::Load(0x07)));
+        assert!(s.next().is_none());
+    }
+
+    #[test]
+    fn scan_store() {
+        let bytes = [OP_STORE, 0xFF];
+        let mut s = Scanner::new(&bytes);
+        assert_eq!(s.next(), Some(Op::Store(0xFF)));
+        assert!(s.next().is_none());
+    }
+
+    #[test]
+    fn scan_load_store_sequence() {
+        let bytes = [OP_PUSH_BYTE, 0x42, OP_STORE, 0x00, OP_LOAD, 0x00];
+        let collected: Vec<Op> = Scanner::new(&bytes).collect();
+        assert_eq!(
+            collected,
+            vec![Op::PushByte(0x42), Op::Store(0x00), Op::Load(0x00),]
+        );
+    }
+
+    #[test]
+    fn eof_in_load_payload_returns_none() {
+        let bytes = [OP_LOAD]; // missing register byte
+        let mut s = Scanner::new(&bytes);
+        assert!(s.next().is_none());
+        assert!(s.next().is_none());
+    }
+
+    #[test]
+    fn eof_in_store_payload_returns_none() {
+        let bytes = [OP_STORE]; // missing register byte
+        let mut s = Scanner::new(&bytes);
+        assert!(s.next().is_none());
+        assert!(s.next().is_none());
     }
 }
