@@ -26,9 +26,11 @@ pub mod r#const {
     pub const OP_SELF_AMT: u8 = 0x20; // Pushes the amount of the UTXO being spent.
     pub const OP_SELF_DATA: u8 = 0x21; // Pushes the data hash of the UTXO being spent.
     pub const OP_SELF_COMM: u8 = 0x22; // Pushes the commitment of the UTXO being spent.
+    pub const OP_SELF_VERSION: u8 = 0x26; // Pushes the version of the UTXO being spent.
     pub const OP_OUT_AMT: u8 = 0x23; // Pops index, pushes the amount of Output[index].
     pub const OP_OUT_DATA: u8 = 0x24; // Pops index, pushes the data hash of Output[index].
     pub const OP_OUT_COMM: u8 = 0x25; // Pops index, pushes the commitment of Output[index].
+    pub const OP_OUT_VERSION: u8 = 0x27; // Pops index, pushes the Version of Output[index].
 
     // Sighash Operations
     pub const OP_SIGHASH_ALL: u8 = 0x30; // Pushes the sighash for all inputs and outputs onto the stack.
@@ -122,6 +124,13 @@ pub enum Op<'a> {
     /// The index is taken from the stack at runtime; the opcode itself carries
     /// no immediate operand.
     OutComm,
+    /// Pushes the version of the UTXO being spent.
+    SelfVersion,
+    /// Pops index, pushes Version of Output[index].
+    ///
+    /// The index is taken from the stack at runtime; the opcode itself carries
+    /// no immediate operand.
+    OutVersion,
     /// Pushes the current total supply of the currency onto the stack.
     Supply,
     /// Pushes the supply of the UTXO being spent onto the stack.
@@ -220,11 +229,11 @@ impl core::convert::TryFrom<u8> for Op<'_> {
             OP_SELF_AMT => Ok(Op::SelfAmt),
             OP_SELF_DATA => Ok(Op::SelfData),
             OP_SELF_COMM => Ok(Op::SelfComm),
-            // Out opcodes no longer carry an immediate index byte; the index is
-            // consumed from the stack by the VM at runtime.
+            OP_SELF_VERSION => Ok(Op::SelfVersion),
             OP_OUT_AMT => Ok(Op::OutAmt),
             OP_OUT_DATA => Ok(Op::OutData),
             OP_OUT_COMM => Ok(Op::OutComm),
+            OP_OUT_VERSION => Ok(Op::OutVersion),
             OP_PUSH_SUPPLY => Ok(Op::Supply),
             OP_PUSH_HEIGHT => Ok(Op::Height),
             OP_SELF_HEIGHT => Ok(Op::SelfHeight),
@@ -272,9 +281,11 @@ impl From<Op<'_>> for u8 {
             Op::SelfAmt => OP_SELF_AMT,
             Op::SelfData => OP_SELF_DATA,
             Op::SelfComm => OP_SELF_COMM,
+            Op::SelfVersion => OP_SELF_VERSION,
             Op::OutAmt => OP_OUT_AMT,
             Op::OutData => OP_OUT_DATA,
             Op::OutComm => OP_OUT_COMM,
+            Op::OutVersion => OP_OUT_VERSION,
             Op::Supply => OP_PUSH_SUPPLY,
             Op::Height => OP_PUSH_HEIGHT,
             Op::SelfHeight => OP_SELF_HEIGHT,
@@ -323,6 +334,8 @@ impl<'a> core::fmt::Display for Op<'a> {
             Op::OutAmt => write!(f, "OutAmt"),
             Op::OutData => write!(f, "OutData"),
             Op::OutComm => write!(f, "OutComm"),
+            Op::SelfVersion => write!(f, "SelfVersion"),
+            Op::OutVersion => write!(f, "OutVersion"),
             Op::Supply => write!(f, "Supply"),
             Op::Height => write!(f, "Height"),
             Op::SelfHeight => write!(f, "SelfHeight"),
