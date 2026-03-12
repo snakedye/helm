@@ -68,6 +68,9 @@ pub mod r#const {
     pub const OP_CLONE: u8 = 0x84; // Expands the next decoded opcode into `count` copies.
     pub const OP_VERIFYSIG: u8 = 0x85; // Macro: expands to [OP_PUSH_SIG, OP_SIGHASH_ALL, OP_PUSH_PK, OP_CHECKSIG, OP_VERIFY].
     pub const OP_ERR: u8 = 0x86; // Throws a verify error.
+
+    pub const OP_PRAGMA_START: u8 = 0x87; // Delineates the beginning of a macro body.
+    pub const OP_PRAGMA_END: u8 = 0x88; // Delineates the end of a macro body.
 }
 
 // Re-export the constants so existing imports like `use crate::core::vm::op::OP_TRUE`
@@ -105,11 +108,20 @@ pub enum Op<'a> {
     /// Pushes the Commitment of the UTXO being spent.
     SelfComm,
     /// Pops index, pushes Amount of Output[index].
-    OutAmt(u8),
+    ///
+    /// The index is taken from the stack at runtime; the opcode itself carries
+    /// no immediate operand.
+    OutAmt,
     /// Pops index, pushes Data Hash of Output[index].
-    OutData(u8),
+    ///
+    /// The index is taken from the stack at runtime; the opcode itself carries
+    /// no immediate operand.
+    OutData,
     /// Pops index, pushes Commitment of Output[index].
-    OutComm(u8),
+    ///
+    /// The index is taken from the stack at runtime; the opcode itself carries
+    /// no immediate operand.
+    OutComm,
     /// Pushes the current total supply of the currency onto the stack.
     Supply,
     /// Pushes the supply of the UTXO being spent onto the stack.
@@ -208,9 +220,11 @@ impl core::convert::TryFrom<u8> for Op<'_> {
             OP_SELF_AMT => Ok(Op::SelfAmt),
             OP_SELF_DATA => Ok(Op::SelfData),
             OP_SELF_COMM => Ok(Op::SelfComm),
-            OP_OUT_AMT => Ok(Op::OutAmt(0)), // placeholder; Scanner must read 1 byte after opcode
-            OP_OUT_DATA => Ok(Op::OutData(0)), // placeholder; Scanner must read 1 byte after opcode
-            OP_OUT_COMM => Ok(Op::OutComm(0)), // placeholder; Scanner must read 1 byte after opcode
+            // Out opcodes no longer carry an immediate index byte; the index is
+            // consumed from the stack by the VM at runtime.
+            OP_OUT_AMT => Ok(Op::OutAmt),
+            OP_OUT_DATA => Ok(Op::OutData),
+            OP_OUT_COMM => Ok(Op::OutComm),
             OP_PUSH_SUPPLY => Ok(Op::Supply),
             OP_PUSH_HEIGHT => Ok(Op::Height),
             OP_SELF_HEIGHT => Ok(Op::SelfHeight),
@@ -258,9 +272,9 @@ impl From<Op<'_>> for u8 {
             Op::SelfAmt => OP_SELF_AMT,
             Op::SelfData => OP_SELF_DATA,
             Op::SelfComm => OP_SELF_COMM,
-            Op::OutAmt(_) => OP_OUT_AMT,
-            Op::OutData(_) => OP_OUT_DATA,
-            Op::OutComm(_) => OP_OUT_COMM,
+            Op::OutAmt => OP_OUT_AMT,
+            Op::OutData => OP_OUT_DATA,
+            Op::OutComm => OP_OUT_COMM,
             Op::Supply => OP_PUSH_SUPPLY,
             Op::Height => OP_PUSH_HEIGHT,
             Op::SelfHeight => OP_SELF_HEIGHT,
@@ -306,9 +320,9 @@ impl<'a> core::fmt::Display for Op<'a> {
             Op::SelfAmt => write!(f, "SelfAmt"),
             Op::SelfData => write!(f, "SelfData"),
             Op::SelfComm => write!(f, "SelfComm"),
-            Op::OutAmt(index) => write!(f, "OutAmt({})", index),
-            Op::OutData(index) => write!(f, "OutData({})", index),
-            Op::OutComm(index) => write!(f, "OutComm({})", index),
+            Op::OutAmt => write!(f, "OutAmt"),
+            Op::OutData => write!(f, "OutData"),
+            Op::OutComm => write!(f, "OutComm"),
             Op::Supply => write!(f, "Supply"),
             Op::Height => write!(f, "Height"),
             Op::SelfHeight => write!(f, "SelfHeight"),
@@ -353,9 +367,9 @@ mod tests {
             Op::SelfAmt,
             Op::SelfData,
             Op::SelfComm,
-            Op::OutAmt(0),
-            Op::OutData(0),
-            Op::OutComm(0),
+            Op::OutAmt,
+            Op::OutData,
+            Op::OutComm,
             Op::Supply,
             Op::SelfSupply,
             Op::Height,
@@ -421,15 +435,15 @@ mod tests {
     fn supply_height_and_out_ops_bytes() {
         let s: u8 = Op::Supply.into();
         let h: u8 = Op::Height.into();
-        let out_amt: u8 = Op::OutAmt(42).into();
-        let out_data: u8 = Op::OutData(42).into();
-        let out_comm: u8 = Op::OutComm(42).into();
+        // Out opcodes no longer take an immediate index; they are zero-arg opcodes.
+        let out_amt: u8 = Op::OutAmt.into();
+        let out_data: u8 = Op::OutData.into();
+        let out_comm: u8 = Op::OutComm.into();
 
         assert_eq!(s, OP_PUSH_SUPPLY);
         assert_eq!(out_amt, OP_OUT_AMT);
         assert_eq!(out_data, OP_OUT_DATA);
         assert_eq!(out_comm, OP_OUT_COMM);
-        assert_eq!(h, OP_PUSH_HEIGHT);
 
         let ps = Op::try_from(s).unwrap();
         let ph = Op::try_from(h).unwrap();
@@ -438,9 +452,9 @@ mod tests {
         let parsed_out_comm = Op::try_from(out_comm).unwrap();
 
         assert_eq!(ps, Op::Supply);
-        assert_eq!(parsed_out_amt, Op::OutAmt(0));
-        assert_eq!(parsed_out_data, Op::OutData(0));
-        assert_eq!(parsed_out_comm, Op::OutComm(0));
+        assert_eq!(parsed_out_amt, Op::OutAmt);
+        assert_eq!(parsed_out_data, Op::OutData);
+        assert_eq!(parsed_out_comm, Op::OutComm);
         assert_eq!(ph, Op::Height);
     }
     #[test]

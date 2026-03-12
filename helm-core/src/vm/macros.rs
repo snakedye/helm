@@ -54,7 +54,8 @@ impl<'a> IntoIterator for Expr<'a> {
         match self {
             Expr::Op(op) => Box::new(std::iter::once(op)),
             Expr::Clone { mut scanner, count } => Box::new(
-                std::iter::repeat_n(scanner.next().unwrap().try_into().ok(), count as usize)
+                std::iter::repeat_n(scanner.next(), count as usize)
+                    .flatten()
                     .flatten(),
             ),
             Expr::Sequence(m) => Box::new(m.flatten()),

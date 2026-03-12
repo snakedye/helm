@@ -267,6 +267,13 @@ impl<'a, I: Indexer> Vm<'a, I> {
         &self.transaction.outputs
     }
 
+    fn pop_stack<'s>(
+        op: Op<'a>,
+        stack: VmStack<'s, 's>,
+    ) -> Result<(StackValue<'s>, &'s VmStack<'s, 's>), ExecError> {
+        stack.pop().ok_or_else(|| ExecError::new(op, &stack))
+    }
+
     /// Execute the provided bytecode slice.
     ///
     /// Returns a `u128` representing the exit code of the VM stack (top
@@ -302,22 +309,14 @@ impl<'a, I: Indexer> Vm<'a, I> {
                 }
                 Op::Drop => {
                     // pop top
-                    match stack.pop() {
-                        Some((_v, parent)) => return self.exec(iter, *parent),
-                        None => Err(ExecError::new(op, &stack)),
-                    }
+                    let (_v, parent) = Self::pop_stack(op, stack)?;
+                    return self.exec(iter, *parent);
                 }
                 Op::Swap => {
                     // swap top two elements
-                    if let Some((a, parent1)) = stack.pop() {
-                        if let Some((b, parent2)) = parent1.pop() {
-                            return self.exec(iter, parent2.push(a).push(b));
-                        } else {
-                            Err(ExecError::new(op, &stack))
-                        }
-                    } else {
-                        Err(ExecError::new(op, &stack))
-                    }
+                    let (a, parent1) = Self::pop_stack(op, stack)?;
+                    let (b, parent2) = Self::pop_stack(op, *parent1)?;
+                    return self.exec(iter, parent2.push(a).push(b));
                 }
 
                 // Immediate pushes
@@ -325,44 +324,38 @@ impl<'a, I: Indexer> Vm<'a, I> {
                 Op::PushByte(b) => return self.exec(iter, stack.push(b.into())),
                 Op::PushBytes(bytes) => return self.exec(iter, stack.push(bytes.into())),
 
-                Op::ReadByte => match stack.pop() {
-                    Some((value, parent)) => {
-                        let mut buffer = [0u8; 1];
-                        let bytes_written = value.copy_from_self(&mut buffer);
-                        if bytes_written > 0 {
-                            self.exec(iter, parent.push(buffer[0].into()))
-                        } else {
-                            Err(ExecError::new(op, &stack))
-                        }
+                Op::ReadByte => {
+                    let (value, parent) = Self::pop_stack(op, stack)?;
+                    let mut buffer = [0u8; 1];
+                    let bytes_written = value.copy_from_self(&mut buffer);
+                    if bytes_written > 0 {
+                        self.exec(iter, parent.push(buffer[0].into()))
+                    } else {
+                        Err(ExecError::new(op, &stack))
                     }
-                    None => Err(ExecError::new(op, &stack)),
-                },
-                Op::ReadU32 => match stack.pop() {
-                    Some((value, parent)) => {
-                        let mut buffer = [0u8; 4];
-                        let bytes_written = value.copy_from_self(&mut buffer);
-                        if bytes_written < 4 {
-                            Err(ExecError::new(op, &stack))
-                        } else {
-                            let value = u32::from_be_bytes(buffer);
-                            self.exec(iter, parent.push(value.into()))
-                        }
+                }
+                Op::ReadU32 => {
+                    let (value, parent) = Self::pop_stack(op, stack)?;
+                    let mut buffer = [0u8; 4];
+                    let bytes_written = value.copy_from_self(&mut buffer);
+                    if bytes_written < 4 {
+                        Err(ExecError::new(op, &stack))
+                    } else {
+                        let value = u32::from_be_bytes(buffer);
+                        self.exec(iter, parent.push(value.into()))
                     }
-                    None => Err(ExecError::new(op, &stack)),
-                },
-                Op::ReadU64 => match stack.pop() {
-                    Some((value, parent)) => {
-                        let mut buffer = [0u8; 8];
-                        let bytes_written = value.copy_from_self(&mut buffer);
-                        if bytes_written < 8 {
-                            Err(ExecError::new(op, &stack))
-                        } else {
-                            let value = u64::from_be_bytes(buffer);
-                            self.exec(iter, parent.push(value.into()))
-                        }
+                }
+                Op::ReadU64 => {
+                    let (value, parent) = Self::pop_stack(op, stack)?;
+                    let mut buffer = [0u8; 8];
+                    let bytes_written = value.copy_from_self(&mut buffer);
+                    if bytes_written < 8 {
+                        Err(ExecError::new(op, &stack))
+                    } else {
+                        let value = u64::from_be_bytes(buffer);
+                        self.exec(iter, parent.push(value.into()))
                     }
-                    None => Err(ExecError::new(op, &stack)),
-                },
+                }
 
                 // indexer / transaction related (placeholders or small integrations)
                 Op::SelfAmt => {
@@ -386,18 +379,34 @@ impl<'a, I: Indexer> Vm<'a, I> {
                         .ok_or(ExecError::new(op, &stack))?;
                     return self.exec(iter, stack.push(StackValue::Bytes(&utxo.commitment)));
                 }
-                // The opcode should contain the index of the output to push.
-                Op::OutAmt(idx) => {
-                    let output = &self.get_outputs()[idx as usize];
-                    return self.exec(iter, stack.push(output.amount.into()));
+                // These opcodes pop an index from the stack at runtime and then
+                // push data from the referenced output.
+                Op::OutAmt => {
+                    let (idx_val, parent) = Self::pop_stack(op, stack)?;
+                    let idx = match idx_val {
+                        StackValue::U8(n) => n as usize,
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+                    let output = &self.get_outputs()[idx];
+                    return self.exec(iter, parent.push(output.amount.into()));
                 }
-                Op::OutData(idx) => {
-                    let output = &self.get_outputs()[idx as usize];
-                    return self.exec(iter, stack.push(StackValue::Bytes(&output.data)));
+                Op::OutData => {
+                    let (idx_val, parent) = Self::pop_stack(op, stack)?;
+                    let idx = match idx_val {
+                        StackValue::U8(n) => n as usize,
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+                    let output = &self.get_outputs()[idx];
+                    return self.exec(iter, parent.push(StackValue::Bytes(&output.data)));
                 }
-                Op::OutComm(idx) => {
-                    let output = &self.get_outputs()[idx as usize];
-                    return self.exec(iter, stack.push(StackValue::Bytes(&output.commitment)));
+                Op::OutComm => {
+                    let (idx_val, parent) = Self::pop_stack(op, stack)?;
+                    let idx = match idx_val {
+                        StackValue::U8(n) => n as usize,
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+                    let output = &self.get_outputs()[idx];
+                    return self.exec(iter, parent.push(StackValue::Bytes(&output.commitment)));
                 }
 
                 // Chain state
@@ -462,128 +471,102 @@ impl<'a, I: Indexer> Vm<'a, I> {
                 // Crypto & hashing (placeholders)
                 Op::CheckSig => {
                     // Pops pk, sig, and sighash (top is sig, next is pk, then sighash)
-                    if let Some((StackValue::Bytes(pk), parent1)) = stack.pop() {
-                        if let Some((StackValue::Bytes(sighash), parent2)) = parent1.pop() {
-                            if let Some((StackValue::Bytes(sig), parent3)) = parent2.pop() {
-                                let signature = ed25519_dalek::Signature::from_slice(sig)
-                                    .map_err(|_| ExecError::new(op, &stack))?;
-                                let mut pubkey_bytes = [0u8; 32];
-                                pubkey_bytes.copy_from_slice(pk);
-                                let verifying_key =
-                                    ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes)
-                                        .map_err(|_| ExecError::new(op, &stack))?;
+                    let (pk_val, parent1) = Self::pop_stack(op, stack)?;
+                    let pk = match pk_val {
+                        StackValue::Bytes(pk) => pk,
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
 
-                                let result = verifying_key.verify(sighash, &signature).is_ok();
-                                return self.exec(iter, parent3.push(result.into()));
-                            } else {
-                                return Err(ExecError::new(op, &stack));
-                            }
-                        } else {
-                            return Err(ExecError::new(op, &stack));
-                        }
-                    } else {
-                        return Err(ExecError::new(op, &stack));
-                    }
+                    let (sighash_val, parent2) = Self::pop_stack(op, *parent1)?;
+                    let sighash = match sighash_val {
+                        StackValue::Bytes(sighash) => sighash,
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+
+                    let (sig_val, parent3) = Self::pop_stack(op, *parent2)?;
+                    let sig = match sig_val {
+                        StackValue::Bytes(sig) => sig,
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+
+                    let signature = ed25519_dalek::Signature::from_slice(sig)
+                        .map_err(|_| ExecError::new(op, &stack))?;
+                    let mut pubkey_bytes = [0u8; 32];
+                    pubkey_bytes.copy_from_slice(pk);
+                    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes)
+                        .map_err(|_| ExecError::new(op, &stack))?;
+
+                    let result = verifying_key.verify(sighash, &signature).is_ok();
+                    return self.exec(iter, parent3.push(result.into()));
                 }
-                Op::HashB2 => match stack.pop() {
-                    Some((value, parent)) => {
-                        let hash = blake2::Blake2s256::digest(&value.to_bytes());
-                        return self.exec(iter, parent.push(StackValue::Bytes(&hash)));
-                    }
-                    None => Err(ExecError::new(op, &stack)),
-                },
+                Op::HashB2 => {
+                    let (value, parent) = Self::pop_stack(op, stack)?;
+                    let hash = blake2::Blake2s256::digest(&value.to_bytes());
+                    return self.exec(iter, parent.push(StackValue::Bytes(&hash)));
+                }
 
                 // Comparisons / arithmetic
-                Op::Equal => match stack.pop() {
-                    Some((a, parent1)) => match parent1.pop() {
-                        Some((b, parent2)) => {
-                            let res = (a == b) as u8;
+                Op::Equal => {
+                    let (a, parent1) = Self::pop_stack(op, stack)?;
+                    let (b, parent2) = Self::pop_stack(op, *parent1)?;
+                    let res = (a == b) as u8;
+                    return self.exec(iter, parent2.push(res.into()));
+                }
+                // Pops a,b pushes 1 if b>a (consistent with earlier spec)
+                Op::Greater => {
+                    let (a, parent1) = Self::pop_stack(op, stack)?;
+                    let (b, parent2) = Self::pop_stack(op, *parent1)?;
+                    match (a.try_into(), b.try_into()) {
+                        (Ok(a), Ok::<u64, _>(b)) => {
+                            let res = (b > a) as u8;
                             return self.exec(iter, parent2.push(res.into()));
                         }
-                        None => return Err(ExecError::new(op, &stack)),
-                    },
-                    None => return Err(ExecError::new(op, &stack)),
-                },
-                // Pops a,b pushes 1 if b>a (consistent with earlier spec)
-                Op::Greater => match stack.pop() {
-                    Some((a, parent1)) => match parent1.pop() {
-                        Some((b, parent2)) => match (a.try_into(), b.try_into()) {
-                            (Ok(a), Ok::<u64, _>(b)) => {
-                                let res = (b > a) as u8;
-                                return self.exec(iter, parent2.push(res.into()));
-                            }
-                            _ => return Err(ExecError::new(op, &stack)),
-                        },
-                        None => return Err(ExecError::new(op, &stack)),
-                    },
-                    None => return Err(ExecError::new(op, &stack)),
-                },
-                Op::Cat => {
-                    if let Some((a, parent1)) = stack.pop() {
-                        if let Some((b, parent2)) = parent1.pop() {
-                            // Limit the size of the concatenated stream to DOS attacks
-                            if a.len() + b.len() > MAX_VALUE_SIZE {
-                                return Err(ExecError::new(op, &stack));
-                            }
-                            return self.exec(
-                                iter,
-                                parent2.push(StackValue::Stream(stack.iter().take(2))),
-                            );
-                        }
+                        _ => return Err(ExecError::new(op, &stack)),
                     }
-                    Err(ExecError::new(op, &stack))
+                }
+                Op::Cat => {
+                    let (a, parent1) = Self::pop_stack(op, stack)?;
+                    let (b, parent2) = Self::pop_stack(op, *parent1)?;
+                    // Limit the size of the concatenated stream to DOS attacks
+                    if a.len() + b.len() > MAX_VALUE_SIZE {
+                        return Err(ExecError::new(op, &stack));
+                    }
+                    return self.exec(iter, parent2.push(StackValue::Stream(stack.iter().take(2))));
                 }
                 Op::Split(index) => {
-                    if let Some((a, parent)) = stack.pop() {
-                        match a {
-                            StackValue::Bytes(bytes) => {
-                                let (left, right) = bytes.split_at(index as usize);
-                                return self
-                                    .exec(iter, parent.push(left.into()).push(right.into()));
-                            }
-                            StackValue::Stream { .. } => {
-                                let bytes = a.to_bytes();
-                                let (left, right) = bytes.split_at(index as usize);
-                                return self
-                                    .exec(iter, parent.push(left.into()).push(right.into()));
-                            }
-                            _ => Err(ExecError::new(op, &stack)),
+                    let (a, parent) = Self::pop_stack(op, stack)?;
+                    match a {
+                        StackValue::Bytes(bytes) => {
+                            let (left, right) = bytes.split_at(index as usize);
+                            return self.exec(iter, parent.push(left.into()).push(right.into()));
                         }
-                    } else {
-                        Err(ExecError::new(op, &stack))
+                        StackValue::Stream { .. } => {
+                            let bytes = a.to_bytes();
+                            let (left, right) = bytes.split_at(index as usize);
+                            return self.exec(iter, parent.push(left.into()).push(right.into()));
+                        }
+                        _ => Err(ExecError::new(op, &stack)),
                     }
                 }
                 Op::Add => {
                     // Pops a,b pushes b+a
-                    match stack.pop() {
-                        Some((a, parent1)) => match parent1.pop() {
-                            Some((b, parent2)) => {
-                                let sum = match (a.try_into(), b.try_into()) {
-                                    (Ok(a), Ok::<u64, _>(b)) => b.wrapping_add(a),
-                                    _ => return Err(ExecError::new(op, &stack)),
-                                };
-                                return self.exec(iter, parent2.push(sum.into()));
-                            }
-                            None => return Err(ExecError::new(op, &stack)),
-                        },
-                        None => return Err(ExecError::new(op, &stack)),
-                    }
+                    let (a, parent1) = Self::pop_stack(op, stack)?;
+                    let (b, parent2) = Self::pop_stack(op, *parent1)?;
+                    let sum = match (a.try_into(), b.try_into()) {
+                        (Ok(a), Ok::<u64, _>(b)) => b.wrapping_add(a),
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+                    return self.exec(iter, parent2.push(sum.into()));
                 }
                 Op::Sub => {
                     // Pops a,b pushes b-a
-                    match stack.pop() {
-                        Some((a, parent1)) => match parent1.pop() {
-                            Some((b, parent2)) => {
-                                let diff = match (a.try_into(), b.try_into()) {
-                                    (Ok(a), Ok::<u64, _>(b)) => b.wrapping_sub(a),
-                                    _ => return Err(ExecError::new(op, &stack)),
-                                };
-                                return self.exec(iter, parent2.push(diff.into()));
-                            }
-                            None => return Err(ExecError::new(op, &stack)),
-                        },
-                        None => return Err(ExecError::new(op, &stack)),
-                    }
+                    let (a, parent1) = Self::pop_stack(op, stack)?;
+                    let (b, parent2) = Self::pop_stack(op, *parent1)?;
+                    let diff = match (a.try_into(), b.try_into()) {
+                        (Ok(a), Ok::<u64, _>(b)) => b.wrapping_sub(a),
+                        _ => return Err(ExecError::new(op, &stack)),
+                    };
+                    return self.exec(iter, parent2.push(diff.into()));
                 }
 
                 // Flow control / verification
@@ -596,20 +579,16 @@ impl<'a, I: Indexer> Vm<'a, I> {
                 }
                 Op::Return => Ok(stack.get().map(StackValue::to_owned).unwrap_or_default()),
                 Op::If => {
-                    match stack.pop() {
-                        Some((cond, parent)) => {
-                            if matches!(cond, StackValue::U32(0) | StackValue::U8(0)) {
-                                iter.find(|op| matches!(op, Op::EndIf));
-                                // Skip the if block and recurse with the parent stack.
-                                return self.exec(iter, stack);
-                            } else if matches!(cond, StackValue::Bytes(_)) {
-                                return Err(ExecError::new(op, &stack));
-                            } else {
-                                // Recurse with the parent stack.
-                                return self.exec(iter, *parent);
-                            }
-                        }
-                        None => return Err(ExecError::new(op, &stack)),
+                    let (cond, parent) = Self::pop_stack(op, stack)?;
+                    if matches!(cond, StackValue::U32(0) | StackValue::U8(0)) {
+                        iter.find(|op| matches!(op, Op::EndIf));
+                        // Skip the if block and recurse with the parent stack.
+                        return self.exec(iter, stack);
+                    } else if matches!(cond, StackValue::Bytes(_)) {
+                        return Err(ExecError::new(op, &stack));
+                    } else {
+                        // Recurse with the parent stack.
+                        return self.exec(iter, *parent);
                     }
                 }
                 Op::EndIf => return self.exec(iter, stack),
@@ -834,7 +813,8 @@ mod tests {
         transaction.outputs.push(output);
 
         let vm = create_vm(&indexer, 0, &transaction);
-        let code = [u8::from(Op::OutAmt(0)), 0];
+        // Push index then call the opcode which will pop it at runtime.
+        let code = [OP_PUSH_BYTE, 0, OP_OUT_AMT];
         assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(200)));
     }
 
@@ -857,7 +837,8 @@ mod tests {
 
         let vm = create_vm(&indexer, 0, &transaction);
 
-        let code = [u8::from(Op::OutData(0)), 0, OP_DUP, OP_EQUAL];
+        // Push index then call the opcode which will pop it and push the data.
+        let code = [OP_PUSH_BYTE, 0, OP_OUT_DATA, OP_DUP, OP_EQUAL];
         assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
     }
 
@@ -880,7 +861,8 @@ mod tests {
 
         let vm = create_vm(&indexer, 0, &transaction);
 
-        let code = [u8::from(Op::OutComm(0)), 0, OP_DUP, OP_EQUAL];
+        // Push index then call the opcode which will pop it and push the commitment.
+        let code = [OP_PUSH_BYTE, 0, OP_OUT_COMM, OP_DUP, OP_EQUAL];
         assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(1)));
     }
 
