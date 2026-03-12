@@ -379,14 +379,7 @@ impl<'a, I: Indexer> Vm<'a, I> {
                         .ok_or(ExecError::new(op, &stack))?;
                     return self.exec(iter, stack.push(StackValue::Bytes(&utxo.commitment)));
                 }
-                Op::SelfVersion => {
-                    let utxo = self
-                        .indexer
-                        .get_output(&self.get_input().output_id)
-                        .ok_or(ExecError::new(op, &stack))?;
-                    // Push the protocol version of the UTXO as a single byte.
-                    return self.exec(iter, stack.push(utxo.version.inner().into()));
-                }
+
                 // These opcodes pop an index from the stack at runtime and then
                 // push data from the referenced output.
                 Op::OutAmt => {
@@ -416,15 +409,12 @@ impl<'a, I: Indexer> Vm<'a, I> {
                     let output = &self.get_outputs()[idx];
                     return self.exec(iter, parent.push(StackValue::Bytes(&output.commitment)));
                 }
-                Op::OutVersion => {
-                    let (idx_val, parent) = Self::pop_stack(op, stack)?;
-                    let idx = match idx_val {
-                        StackValue::U8(n) => n as usize,
-                        _ => return Err(ExecError::new(op, &stack)),
-                    };
-                    let output = &self.get_outputs()[idx];
-                    // Output version is a small protocol version; push as a single byte.
-                    return self.exec(iter, parent.push(StackValue::U8(output.version.inner())));
+                Op::OutCount => {
+                    // Push the number of outputs in the current transaction as a single byte.
+                    let count = self.get_outputs().len();
+                    // If there are more outputs than fit in a single byte, wrap/truncate.
+                    // For typical transactions this will fit in a u8.
+                    return self.exec(iter, stack.push(StackValue::U8(count as u8)));
                 }
 
                 // Chain state
@@ -816,26 +806,6 @@ mod tests {
     }
 
     #[test]
-    fn test_op_self_version() {
-        let tx_hash = TransactionHash::default();
-        let output_id = OutputId::new(tx_hash, 0);
-        let output = Output {
-            version: Version::ONE,
-            amount: 100,
-            commitment: [0; 32],
-            data: [0; 32],
-        };
-        let input = Input::new_unsigned(output_id);
-        let mut indexer = MockLedger::default();
-        indexer.utxos.insert(output_id, output);
-        let transaction = Transaction::new(vec![input], vec![]);
-        let vm = create_vm(&indexer, 0, &transaction);
-
-        let code = [OP_SELF_VERSION];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(Version::ONE.inner())));
-    }
-
-    #[test]
     fn test_op_out_amt() {
         let tx_hash = [1; 32];
         let output_id = OutputId::new(tx_hash, 0);
@@ -905,24 +875,33 @@ mod tests {
     }
 
     #[test]
-    fn test_op_out_version() {
-        let tx_hash = [1; 32];
+    fn test_op_out_count() {
+        let tx_hash = [2; 32];
         let output_id = OutputId::new(tx_hash, 0);
-        let output = Output {
+        let output_a = Output {
             version: Version::ONE,
-            amount: 200,
+            amount: 111,
+            commitment: [0; 32],
+            data: [0; 32],
+        };
+        let output_b = Output {
+            version: Version::ONE,
+            amount: 222,
             commitment: [0; 32],
             data: [0; 32],
         };
         let mut indexer = MockLedger::default();
-        indexer.utxos.insert(output_id, output);
+        indexer.utxos.insert(output_id, output_a);
+        // build a transaction with two outputs
         let mut transaction = default_transaction();
-        transaction.outputs.push(output);
+        transaction.outputs.push(output_a);
+        transaction.outputs.push(output_b);
 
         let vm = create_vm(&indexer, 0, &transaction);
-        // Push index then call the opcode which will pop it and push the version byte.
-        let code = [OP_PUSH_BYTE, 0, OP_OUT_VERSION];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(Version::ONE.inner())));
+
+        // OP_OUT_COUNT should push the number of outputs (2) as a byte.
+        let code = [OP_OUT_COUNT];
+        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(2)));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::vm::{
 };
 
 use super::op::{
-    OP_CHECKSIG, OP_CLONE, OP_OUT_AMT, OP_OUT_COMM, OP_OUT_DATA, OP_PRAGMA_END, OP_PRAGMA_START,
+    OP_CHECKSIG, OP_CLONE, OP_ENDPRAGMA, OP_OUT_AMT, OP_OUT_COMM, OP_OUT_DATA, OP_PRAGMA,
     OP_PUSH_BYTE, OP_PUSH_BYTES, OP_PUSH_PK, OP_PUSH_SIG, OP_PUSH_U32, OP_SPLIT, OP_SWAP,
     OP_VERIFY, OP_VERIFYSIG, Op,
 };
@@ -54,7 +54,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn read_pragma_body(&mut self) -> Option<&'a [u8]> {
-        let end = self.bytes.iter().position(|b| *b == OP_PRAGMA_END)?;
+        let end = self.bytes.iter().position(|b| *b == OP_ENDPRAGMA)?;
         let (body, rest) = self.bytes.split_at(end);
         self.bytes = rest.split_first()?.1;
         Some(body)
@@ -109,11 +109,11 @@ impl<'a> Iterator for Scanner<'a> {
                 OP_VERIFY,
             ])),
             OP_VERIFY => Some(Expr::seq(&[OP_FALSE, OP_EQUAL, OP_IF, OP_ERR, OP_ENDIF])),
-            OP_PRAGMA_START => match self.read_pragma_body() {
+            OP_PRAGMA => match self.read_pragma_body() {
                 Some(body) => Some(Expr::seq(body)),
                 None => self.fail_eof(),
             },
-            OP_PRAGMA_END => self.fail_eof(),
+            OP_ENDPRAGMA => self.fail_eof(),
             // For other single-byte opcodes rely on Op::try_from
             other => Op::try_from(other).ok().map(Expr::from),
         }
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn scan_pragma_sequence_macro() {
-        let bytes = [OP_PRAGMA_START, OP_TRUE, OP_FALSE, OP_PRAGMA_END];
+        let bytes = [OP_PRAGMA, OP_TRUE, OP_FALSE, OP_ENDPRAGMA];
         let collected: Vec<Op> = Scanner::new(&bytes).flatten().collect();
         assert_eq!(collected, vec![Op::PushByte(1), Op::PushByte(0)]);
     }
@@ -289,10 +289,10 @@ mod tests {
     fn scan_pragma_sequence_macro_in_sequence() {
         let bytes = [
             OP_TRUE,
-            OP_PRAGMA_START,
+            OP_PRAGMA,
             OP_PUSH_BYTE,
             0x2A,
-            OP_PRAGMA_END,
+            OP_ENDPRAGMA,
             OP_FALSE,
         ];
         let collected: Vec<Op> = Scanner::new(&bytes).flatten().collect();
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn scan_pragma_without_end_returns_error() {
-        let bytes = [OP_PRAGMA_START, OP_TRUE];
+        let bytes = [OP_PRAGMA, OP_TRUE];
         let mut s = Scanner::new(&bytes);
         assert_eq!(s.next(), None);
         assert_eq!(s.next(), None);

@@ -26,11 +26,10 @@ pub mod r#const {
     pub const OP_SELF_AMT: u8 = 0x20; // Pushes the amount of the UTXO being spent.
     pub const OP_SELF_DATA: u8 = 0x21; // Pushes the data hash of the UTXO being spent.
     pub const OP_SELF_COMM: u8 = 0x22; // Pushes the commitment of the UTXO being spent.
-    pub const OP_SELF_VERSION: u8 = 0x26; // Pushes the version of the UTXO being spent.
     pub const OP_OUT_AMT: u8 = 0x23; // Pops index, pushes the amount of Output[index].
     pub const OP_OUT_DATA: u8 = 0x24; // Pops index, pushes the data hash of Output[index].
     pub const OP_OUT_COMM: u8 = 0x25; // Pops index, pushes the commitment of Output[index].
-    pub const OP_OUT_VERSION: u8 = 0x27; // Pops index, pushes the Version of Output[index].
+    pub const OP_OUT_COUNT: u8 = 0x26; // Pushes the number of outputs in the transaction.
 
     // Sighash Operations
     pub const OP_SIGHASH_ALL: u8 = 0x30; // Pushes the sighash for all inputs and outputs onto the stack.
@@ -71,8 +70,8 @@ pub mod r#const {
     pub const OP_VERIFYSIG: u8 = 0x85; // Macro: expands to [OP_PUSH_SIG, OP_SIGHASH_ALL, OP_PUSH_PK, OP_CHECKSIG, OP_VERIFY].
     pub const OP_ERR: u8 = 0x86; // Throws a verify error.
 
-    pub const OP_PRAGMA_START: u8 = 0x87; // Delineates the beginning of a macro body.
-    pub const OP_PRAGMA_END: u8 = 0x88; // Delineates the end of a macro body.
+    pub const OP_PRAGMA: u8 = 0x87; // Delineates the beginning of a macro body.
+    pub const OP_ENDPRAGMA: u8 = 0x88; // Delineates the end of a macro body.
 }
 
 // Re-export the constants so existing imports like `use crate::core::vm::op::OP_TRUE`
@@ -124,13 +123,8 @@ pub enum Op<'a> {
     /// The index is taken from the stack at runtime; the opcode itself carries
     /// no immediate operand.
     OutComm,
-    /// Pushes the version of the UTXO being spent.
-    SelfVersion,
-    /// Pops index, pushes Version of Output[index].
-    ///
-    /// The index is taken from the stack at runtime; the opcode itself carries
-    /// no immediate operand.
-    OutVersion,
+    /// Pushes the number of outputs in the transaction.
+    OutCount,
     /// Pushes the current total supply of the currency onto the stack.
     Supply,
     /// Pushes the supply of the UTXO being spent onto the stack.
@@ -229,11 +223,10 @@ impl core::convert::TryFrom<u8> for Op<'_> {
             OP_SELF_AMT => Ok(Op::SelfAmt),
             OP_SELF_DATA => Ok(Op::SelfData),
             OP_SELF_COMM => Ok(Op::SelfComm),
-            OP_SELF_VERSION => Ok(Op::SelfVersion),
             OP_OUT_AMT => Ok(Op::OutAmt),
             OP_OUT_DATA => Ok(Op::OutData),
             OP_OUT_COMM => Ok(Op::OutComm),
-            OP_OUT_VERSION => Ok(Op::OutVersion),
+            OP_OUT_COUNT => Ok(Op::OutCount),
             OP_PUSH_SUPPLY => Ok(Op::Supply),
             OP_PUSH_HEIGHT => Ok(Op::Height),
             OP_SELF_HEIGHT => Ok(Op::SelfHeight),
@@ -281,11 +274,10 @@ impl From<Op<'_>> for u8 {
             Op::SelfAmt => OP_SELF_AMT,
             Op::SelfData => OP_SELF_DATA,
             Op::SelfComm => OP_SELF_COMM,
-            Op::SelfVersion => OP_SELF_VERSION,
             Op::OutAmt => OP_OUT_AMT,
             Op::OutData => OP_OUT_DATA,
             Op::OutComm => OP_OUT_COMM,
-            Op::OutVersion => OP_OUT_VERSION,
+            Op::OutCount => OP_OUT_COUNT,
             Op::Supply => OP_PUSH_SUPPLY,
             Op::Height => OP_PUSH_HEIGHT,
             Op::SelfHeight => OP_SELF_HEIGHT,
@@ -334,8 +326,7 @@ impl<'a> core::fmt::Display for Op<'a> {
             Op::OutAmt => write!(f, "OutAmt"),
             Op::OutData => write!(f, "OutData"),
             Op::OutComm => write!(f, "OutComm"),
-            Op::SelfVersion => write!(f, "SelfVersion"),
-            Op::OutVersion => write!(f, "OutVersion"),
+            Op::OutCount => write!(f, "OutCount"),
             Op::Supply => write!(f, "Supply"),
             Op::Height => write!(f, "Height"),
             Op::SelfHeight => write!(f, "SelfHeight"),
@@ -452,22 +443,26 @@ mod tests {
         let out_amt: u8 = Op::OutAmt.into();
         let out_data: u8 = Op::OutData.into();
         let out_comm: u8 = Op::OutComm.into();
+        let out_count: u8 = Op::OutCount.into();
 
         assert_eq!(s, OP_PUSH_SUPPLY);
         assert_eq!(out_amt, OP_OUT_AMT);
         assert_eq!(out_data, OP_OUT_DATA);
         assert_eq!(out_comm, OP_OUT_COMM);
+        assert_eq!(out_count, OP_OUT_COUNT);
 
         let ps = Op::try_from(s).unwrap();
         let ph = Op::try_from(h).unwrap();
         let parsed_out_amt = Op::try_from(out_amt).unwrap();
         let parsed_out_data = Op::try_from(out_data).unwrap();
         let parsed_out_comm = Op::try_from(out_comm).unwrap();
+        let parsed_out_count = Op::try_from(out_count).unwrap();
 
         assert_eq!(ps, Op::Supply);
         assert_eq!(parsed_out_amt, Op::OutAmt);
         assert_eq!(parsed_out_data, Op::OutData);
         assert_eq!(parsed_out_comm, Op::OutComm);
+        assert_eq!(parsed_out_count, Op::OutCount);
         assert_eq!(ph, Op::Height);
     }
     #[test]
