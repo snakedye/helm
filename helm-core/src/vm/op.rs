@@ -64,7 +64,10 @@ pub mod r#const {
     pub const OP_VERIFY: u8 = 0x80; // Pops top item. If 0 (False), the entire transaction is invalid.
     pub const OP_RETURN: u8 = 0x81; // Immediately terminates the script.
     pub const OP_IF: u8 = 0x82; // Executes subsequent code only if the top item is non-zero.
-    pub const OP_END_IF: u8 = 0x83; // Marks the end of an if block.
+    pub const OP_ENDIF: u8 = 0x83; // Marks the end of an if block.
+    pub const OP_CLONE: u8 = 0x84; // Expands the next decoded opcode into `count` copies.
+    pub const OP_VERIFYSIG: u8 = 0x85; // Macro: expands to [OP_PUSH_SIG, OP_SIGHASH_ALL, OP_PUSH_PK, OP_CHECKSIG, OP_VERIFY].
+    pub const OP_ERR: u8 = 0x86; // Throws a verify error.
 }
 
 // Re-export the constants so existing imports like `use crate::core::vm::op::OP_TRUE`
@@ -75,10 +78,6 @@ pub use r#const::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op<'a> {
     // Stack Manipulation
-    /// Pushes an empty array (0) onto the stack.
-    False,
-    /// Pushes a 1 onto the stack.
-    True,
     /// Duplicates the top item on the stack.
     Dup,
     /// Removes the top item from the stack.
@@ -154,13 +153,15 @@ pub enum Op<'a> {
 
     // Control Flow
     /// Pops top item. If 0 (False), the entire transaction is invalid.
-    Verify,
+    // Verify,
     /// Immediately terminates the script.
     Return,
     /// Executes subsequent code only if the top item is non-zero.
     If,
     /// Mark the end of an if block.
     EndIf,
+    /// Throws a verify error.
+    Err,
 
     // Sighash Operations
     /// Pushes the sighash for all inputs and outputs onto the stack.
@@ -197,8 +198,6 @@ impl core::convert::TryFrom<u8> for Op<'_> {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            OP_FALSE => Ok(Op::False),
-            OP_TRUE => Ok(Op::True),
             OP_DUP => Ok(Op::Dup),
             OP_DROP => Ok(Op::Drop),
             OP_SWAP => Ok(Op::Swap),
@@ -228,13 +227,14 @@ impl core::convert::TryFrom<u8> for Op<'_> {
             OP_ADD => Ok(Op::Add),
             OP_SUB => Ok(Op::Sub),
 
-            OP_VERIFY => Ok(Op::Verify),
+            // OP_VERIFY => Ok(Op::Verify),
             OP_RETURN => Ok(Op::Return),
             OP_SIGHASH_ALL => Ok(Op::SighashAll),
             OP_IF => Ok(Op::If),
             OP_SIGHASH_OUT => Ok(Op::SighashOut),
             OP_PUSH_WITNESS => Ok(Op::PushWitness),
-            OP_END_IF => Ok(Op::EndIf),
+            OP_ENDIF => Ok(Op::EndIf),
+            OP_ERR => Ok(Op::Err),
             OP_SPLIT => Ok(Op::Split(0)),
             OP_READ_U32 => Ok(Op::ReadU32),
             OP_READ_U64 => Ok(Op::ReadU64),
@@ -248,8 +248,6 @@ impl core::convert::TryFrom<u8> for Op<'_> {
 impl From<Op<'_>> for u8 {
     fn from(op: Op) -> u8 {
         match op {
-            Op::False => OP_FALSE,
-            Op::True => OP_TRUE,
             Op::Dup => OP_DUP,
             Op::Drop => OP_DROP,
             Op::Swap => OP_SWAP,
@@ -279,12 +277,13 @@ impl From<Op<'_>> for u8 {
             Op::Add => OP_ADD,
             Op::Sub => OP_SUB,
 
-            Op::Verify => OP_VERIFY,
+            // Op::Verify => OP_VERIFY,
             // Op::MulHashB2(_) => OP_MUL_HASH_B2,
             Op::Return => OP_RETURN,
             Op::If => OP_IF,
             Op::SighashAll => OP_SIGHASH_ALL,
-            Op::EndIf => OP_END_IF,
+            Op::EndIf => OP_ENDIF,
+            Op::Err => OP_ERR,
             Op::SighashOut => OP_SIGHASH_OUT,
             Op::PushWitness => OP_PUSH_WITNESS,
             Op::Split(_) => OP_SPLIT,
@@ -298,8 +297,6 @@ impl From<Op<'_>> for u8 {
 impl<'a> core::fmt::Display for Op<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Op::False => write!(f, "False"),
-            Op::True => write!(f, "True"),
             Op::Dup => write!(f, "Dup"),
             Op::Drop => write!(f, "Drop"),
             Op::Swap => write!(f, "Swap"),
@@ -329,10 +326,11 @@ impl<'a> core::fmt::Display for Op<'a> {
             Op::ReadU64 => write!(f, "ReadU64"),
             Op::ReadU32 => write!(f, "ReadU32"),
             Op::ReadByte => write!(f, "ReadByte"),
-            Op::Verify => write!(f, "Verify"),
+            // Op::Verify => write!(f, "Verify"),
             Op::Return => write!(f, "Return"),
             Op::If => write!(f, "If"),
             Op::EndIf => write!(f, "EndIf"),
+            Op::Err => write!(f, "Err"),
             Op::SighashAll => write!(f, "SighashAll"),
             Op::SighashOut => write!(f, "SighashOut"),
             Op::PushWitness => write!(f, "PushWitness"),
@@ -348,8 +346,6 @@ mod tests {
     #[test]
     fn roundtrip_all_simple_ops() {
         let all = [
-            Op::False,
-            Op::True,
             Op::Dup,
             Op::Drop,
             Op::Swap,
@@ -373,13 +369,12 @@ mod tests {
             Op::Cat,
             Op::Add,
             Op::Sub,
-            Op::Verify,
+            // Op::Verify,
             Op::Return,
             Op::If,
             Op::EndIf,
             Op::PushByte(0),
             // Op::MulHashB2(0),
-            Op::Verify,
             Op::Return,
             Op::If,
             Op::EndIf,

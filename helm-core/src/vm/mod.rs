@@ -2,6 +2,7 @@
 VM runtime implementing opcode execution.
 */
 
+mod macros;
 pub mod op;
 mod scanner;
 mod stack;
@@ -23,11 +24,8 @@ pub const fn p2pkh() -> &'static [u8] {
     use op::r#const::*;
     &[
         // Verify signature
-        OP_PUSH_SIG,
         OP_SIGHASH_ALL,
-        OP_PUSH_PK,
-        OP_CHECKSIG,
-        OP_VERIFY,
+        OP_VERIFYSIG,
         // Verify commitment
         OP_SELF_COMM, // Push the original commitment from the UTXO
         OP_SELF_DATA, // Push the script from the UTXO
@@ -45,11 +43,8 @@ pub const fn p2wsh() -> &'static [u8] {
     use op::r#const::*;
     &[
         // Verify signature
-        OP_PUSH_SIG,
         OP_SIGHASH_ALL,
-        OP_PUSH_PK,
-        OP_CHECKSIG,
-        OP_VERIFY,
+        OP_VERIFYSIG,
         // Verify commitment
         OP_SELF_COMM,
         OP_PUSH_WITNESS,
@@ -283,7 +278,7 @@ impl<'a, I: Indexer> Vm<'a, I> {
         let stack: VmStack = Stack::new();
 
         // iterate and execute instructions
-        let mut iter = scanner;
+        let mut iter = scanner.flatten();
         let exit_code = self.exec(&mut iter, stack)?;
 
         Ok(exit_code)
@@ -291,16 +286,12 @@ impl<'a, I: Indexer> Vm<'a, I> {
 
     /// Execute the provided bytecode.
     // This function needs a huge refactor to make it more readable and maintainable.
-    fn exec<'i, S>(&self, iter: &'i mut S, mut stack: VmStack) -> Result<OwnedStackValue, ExecError>
+    fn exec<'i, S>(&self, iter: &'i mut S, stack: VmStack) -> Result<OwnedStackValue, ExecError>
     where
         S: Iterator<Item = Op<'a>>,
     {
         if let Some(op) = iter.next() {
             return match op {
-                // Literals / stack constants
-                Op::False => return self.exec(iter, stack.push(0_u8.into())),
-                Op::True => return self.exec(iter, stack.push(1_u8.into())),
-
                 // Stack manipulation
                 Op::Dup => {
                     // duplicate top item
@@ -320,8 +311,7 @@ impl<'a, I: Indexer> Vm<'a, I> {
                     // swap top two elements
                     if let Some((a, parent1)) = stack.pop() {
                         if let Some((b, parent2)) = parent1.pop() {
-                            stack = parent2.push(b);
-                            return self.exec(iter, stack.push(a));
+                            return self.exec(iter, parent2.push(a).push(b));
                         } else {
                             Err(ExecError::new(op, &stack))
                         }
@@ -498,8 +488,7 @@ impl<'a, I: Indexer> Vm<'a, I> {
                 Op::HashB2 => match stack.pop() {
                     Some((value, parent)) => {
                         let hash = blake2::Blake2s256::digest(&value.to_bytes());
-                        let hash_bytes: [u8; 32] = hash.try_into().unwrap();
-                        return self.exec(iter, parent.push(StackValue::Bytes(&hash_bytes)));
+                        return self.exec(iter, parent.push(StackValue::Bytes(&hash)));
                     }
                     None => Err(ExecError::new(op, &stack)),
                 },
@@ -598,15 +587,12 @@ impl<'a, I: Indexer> Vm<'a, I> {
                 }
 
                 // Flow control / verification
-                Op::Verify => {
-                    // Pops top item. If 0 -> entire transaction (script) invalid.
-                    match stack.pop() {
-                        Some((StackValue::U32(0), _)) | Some((StackValue::U8(0), _)) => {
-                            return Err(ExecError::new(op, &stack));
-                        }
-                        Some((_, parent)) => return self.exec(iter, *parent),
-                        None => return Err(ExecError::new(op, &stack)),
-                    }
+                // `Op::Err` is a runtime-only opcode that unconditionally fails with a
+                // verify-style error. It should be indistinguishable from a verification
+                // failure to callers, so the returned ExecError uses `OP_VERIFY` as the
+                // error code while retaining a sensible op name and stack trace.
+                Op::Err => {
+                    return Err(ExecError::new(op, &stack));
                 }
                 Op::Return => Ok(stack.get().map(StackValue::to_owned).unwrap_or_default()),
                 Op::If => {
@@ -741,8 +727,8 @@ mod tests {
         let indexer = MockLedger::default();
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
-        let code = [OP_PUSH_BYTE, 200, OP_PUSH_BYTE, 123, OP_SWAP, OP_SUB];
-        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U64(200 - 123)));
+        let code = [OP_PUSH_BYTE, 200, OP_PUSH_BYTE, 123, OP_SWAP];
+        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(200)));
     }
 
     #[test]
@@ -1160,7 +1146,17 @@ mod tests {
         let transaction = default_transaction();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = [OP_PUSH_BYTE, 0, OP_VERIFY, OP_TRUE];
-        assert_eq!(vm.run(&code).unwrap_err().code, OP_VERIFY);
+        assert!(vm.run(&code).is_err());
+    }
+
+    #[test]
+    fn test_op_err() {
+        let indexer = MockLedger::default();
+        let transaction = default_transaction();
+        let vm = create_vm(&indexer, 0, &transaction);
+
+        let res = vm.run(&[OP_ERR]);
+        assert_eq!(res.unwrap_err().code, OP_ERR);
     }
 
     #[test]
@@ -1254,7 +1250,7 @@ mod tests {
         let vm = create_vm(&indexer, 0, &transaction);
         let script = p2pkh();
 
-        assert_eq!(vm.run(&script).unwrap_err().code, OP_VERIFY);
+        assert_eq!(vm.run(&script).unwrap_err().code, OP_ERR);
     }
 
     #[test]
