@@ -10,8 +10,9 @@ supports extensible script and witness validation for advanced transaction types
 */
 
 use crate::Version;
+use crate::vm::check_sig_script;
 
-use super::vm::{ExecError, Vm, check_sig_script, p2pkh};
+use super::vm::{ExecError, Vm, p2pkh};
 use super::{
     Hash, PublicKey, commitment, deserialize_arr, deserialize_vec, ledger::Indexer,
     serialize_to_hex,
@@ -573,7 +574,7 @@ mod tests {
         Hash,
         block::{Block, BlockError},
         ledger::{BlockMetadata, Indexer, Query},
-        vm::p2pkh,
+        vm::{p2pkh, p2wsh},
     };
     use blake2::Blake2s256;
     use ed25519_dalek::Signer;
@@ -979,7 +980,7 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[11u8; 32]);
         let pubkey = signing_key.verifying_key().to_bytes();
 
-        let witness = check_sig_script().to_vec();
+        let witness = p2wsh().to_vec();
         let amount = 42;
 
         let utxo_id = OutputId::new([1u8; 32], 0);
@@ -1008,7 +1009,7 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[11u8; 32]);
         let pubkey = signing_key.verifying_key().to_bytes();
 
-        let witness = check_sig_script().to_vec();
+        let witness = p2wsh().to_vec();
         let amount = 42;
 
         let utxo_id = OutputId::new([1u8; 32], 0);
