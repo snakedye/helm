@@ -11,7 +11,7 @@ supports extensible script and witness validation for advanced transaction types
 
 use crate::Version;
 
-use super::vm::{ExecError, Vm, check_sig_script, p2pkh, p2wsh};
+use super::vm::{ExecError, Vm, check_sig_script, p2pkh};
 use super::{
     Hash, PublicKey, commitment, deserialize_arr, deserialize_vec, ledger::Indexer,
     serialize_to_hex,
@@ -501,7 +501,7 @@ impl Transaction {
                     if input.witness.len() > MAX_WITNESS_SIZE {
                         return Err(TransactionError::InvalidWitnessSize);
                     }
-                    vm.run(&p2wsh()).and_then(|_| vm.run(&input.witness))
+                    vm.run(&input.witness)
                 }
                 _ => unreachable!(),
             }
@@ -940,7 +940,7 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[11u8; 32]);
         let pubkey = signing_key.verifying_key().to_bytes();
 
-        let witness = check_sig_script().to_vec();
+        let witness = p2pkh().to_vec();
         let bad_data = [0u8; 32]; // does NOT match blake2s(witness)
         let commitment = commitment(&pubkey, None);
         let amount = 42;
