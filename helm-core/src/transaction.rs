@@ -10,7 +10,7 @@ supports extensible script and witness validation for advanced transaction types
 */
 
 use crate::Version;
-use crate::vm::check_sig_script;
+use crate::vm::{check_sig_script, p2wsh};
 
 use super::vm::{ExecError, Vm, p2pkh};
 use super::{
@@ -502,7 +502,7 @@ impl Transaction {
                     if input.witness.len() > MAX_WITNESS_SIZE {
                         return Err(TransactionError::InvalidWitnessSize);
                     }
-                    vm.run(&input.witness)
+                    vm.run(&p2wsh()).and_then(|_| vm.run(&input.witness))
                 }
                 _ => unreachable!(),
             }
