@@ -62,13 +62,7 @@ pub const fn p2wsh() -> &'static [u8] {
 /// Verifies the signature of a transaction
 pub const fn check_sig_script() -> &'static [u8] {
     use op::r#const::*;
-    &[
-        OP_PUSH_SIG,
-        OP_SIGHASH_ALL,
-        OP_PUSH_PK,
-        OP_CHECKSIG,
-        OP_VERIFY,
-    ]
+    &[OP_SIGHASH_ALL, OP_VERIFYSIG]
 }
 
 /// VM-level execution error kinds.
@@ -1029,7 +1023,7 @@ mod tests {
         let indexer = MockLedger::default();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = check_sig_script();
-        assert_eq!(vm.run(&code[..4]), Ok(OwnedStackValue::U8(1)));
+        assert_eq!(vm.run(&code), Ok(OwnedStackValue::U8(0)));
     }
 
     #[test]
@@ -1057,7 +1051,7 @@ mod tests {
         let indexer = MockLedger::default();
         let vm = create_vm(&indexer, 0, &transaction);
         let code = check_sig_script();
-        assert_eq!(vm.run(&code[0..4]), Ok(OwnedStackValue::U8(0)));
+        assert_eq!(vm.run(&code).unwrap_err().code, OP_ERR);
     }
 
     #[test]
