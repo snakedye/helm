@@ -21,9 +21,11 @@ pub enum Expr<'a> {
 }
 
 impl<'a> Expr<'a> {
+    /// Constructs a [`Expr::Sequence`] from a byte slice.
     pub fn seq(bytes: &'a [u8]) -> Self {
         Expr::Sequence(Scanner::new(bytes))
     }
+    /// Constructs a [`Expr::Clone`] from a [`Scanner`] and a count.
     pub fn clone(scanner: Scanner<'a>, count: u8) -> Self {
         Expr::Clone { scanner, count }
     }
