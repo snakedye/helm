@@ -44,8 +44,8 @@ impl<'a> Scanner<'a> {
     }
 
     fn read_u32_le(&mut self) -> Option<u32> {
-        let bytes = self.read_exact(4)?;
-        Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        let bytes: [u8; 4] = self.read_exact(4)?.try_into().ok()?;
+        Some(u32::from_le_bytes(bytes))
     }
 
     fn fail_eof(&mut self) -> Option<Expr<'a>> {
