@@ -75,10 +75,12 @@ impl<'a> Iterator for Scanner<'a> {
             OP_FALSE => Some(Op::PushByte(0).into()),
             OP_CLONE => {
                 let count = self.read_u8()?;
-                let scanner = self.clone();
-                let _ = self.next()?;
-                Some(Expr::clone(scanner, count))
+                let expr = self.next()?;
+                Some(Expr::iter(
+                    std::iter::repeat_n(expr, count as usize).flatten(),
+                ))
             }
+
             OP_PUSH_U32 => match self.read_u32_le() {
                 Some(v) => Some(Op::PushU32(v).into()),
                 None => self.fail_eof(),
@@ -101,16 +103,16 @@ impl<'a> Iterator for Scanner<'a> {
                 },
                 None => self.fail_eof(),
             },
-            OP_VERIFYSIG => Some(Expr::seq(&[
-                OP_PUSH_SIG,
-                OP_SWAP,
-                OP_PUSH_PK,
-                OP_CHECKSIG,
-                OP_VERIFY,
-            ])),
-            OP_VERIFY => Some(Expr::seq(&[OP_FALSE, OP_EQUAL, OP_IF, OP_ERR, OP_ENDIF])),
+            OP_VERIFYSIG => Some(Expr::iter(
+                Scanner::new(&[OP_PUSH_SIG, OP_SWAP, OP_PUSH_PK, OP_CHECKSIG, OP_VERIFY]).flatten(),
+            )),
+            OP_VERIFY => Some(Expr::iter(
+                Scanner::new(&[OP_FALSE, OP_EQUAL, OP_IF, OP_ERR, OP_ENDIF]).flatten(),
+            )),
             OP_PRAGMA => match self.read_pragma_body() {
-                Some(body) => Some(Expr::seq(body)),
+                Some(body) => Some(Expr::iter(
+                    Scanner::new(body).filter_map(|op| Op::try_from(op).ok()),
+                )),
                 None => self.fail_eof(),
             },
             OP_ENDPRAGMA => self.fail_eof(),
@@ -234,6 +236,21 @@ mod tests {
         let bytes = [OP_CLONE, 2, OP_PUSH_BYTE, 0x42];
         let collected: Vec<Op> = Scanner::new(&bytes).flatten().collect();
         assert_eq!(collected, vec![Op::PushByte(0x42), Op::PushByte(0x42)]);
+    }
+
+    #[test]
+    fn scan_clone_macro_in_sequence() {
+        let bytes = [OP_TRUE, OP_CLONE, 2, OP_FALSE, OP_TRUE];
+        let collected: Vec<Op> = Scanner::new(&bytes).flatten().collect();
+        assert_eq!(
+            collected,
+            vec![
+                Op::PushByte(1),
+                Op::PushByte(0),
+                Op::PushByte(0),
+                Op::PushByte(1),
+            ]
+        );
     }
 
     #[test]
