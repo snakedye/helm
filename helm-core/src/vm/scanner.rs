@@ -110,9 +110,7 @@ impl<'a> Iterator for Scanner<'a> {
                 Scanner::new(&[OP_FALSE, OP_EQUAL, OP_IF, OP_ERR, OP_ENDIF]).flatten(),
             )),
             OP_PRAGMA => match self.read_pragma_body() {
-                Some(body) => Some(Expr::iter(
-                    Scanner::new(body).filter_map(|op| Op::try_from(op).ok()),
-                )),
+                Some(body) => Some(Expr::iter(Scanner::new(body).flatten())),
                 None => self.fail_eof(),
             },
             OP_ENDPRAGMA => self.fail_eof(),
