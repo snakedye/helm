@@ -69,7 +69,7 @@ async fn get_node_info(
 /// Accepts optional leading "0x".
 fn parse_hex_hash<const N: usize>(s: &str) -> Result<[u8; N], RpcError> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    const_hex::decode_to_array(s).map_err(|e| RpcError::BadRequest(format!("invalid hash: {e}")))
+    const_hex::decode_to_array(s).map_err(|e| RpcError::BadRequest(e.to_string()))
 }
 
 async fn get_confirmations(

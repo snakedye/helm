@@ -260,7 +260,7 @@ impl<S, Fs> RedbIndexer<S, Fs> {
             .enumerate()
         {
             let output_id = input.output_id();
-            let spent_output = utxo_set.remove(output_id)?;
+            let spent_output = utxo_set.remove(output_id).map_err(BlockError::other)?;
             match spent_output {
                 Some(output) if i == 0 => prev_lead_output = Some((output_id, output.value())),
                 Some(_) => {}
@@ -272,7 +272,9 @@ impl<S, Fs> RedbIndexer<S, Fs> {
 
         // We re-insert the lead UTXO to allow for forks
         if let Some((prev_lead_utxo, prev_lead_output)) = prev_lead_output {
-            utxo_set.insert(prev_lead_utxo, prev_lead_output)?;
+            utxo_set
+                .insert(prev_lead_utxo, prev_lead_output)
+                .map_err(BlockError::other)?;
         }
 
         let block_hash = block.header().hash();
@@ -286,10 +288,16 @@ impl<S, Fs> RedbIndexer<S, Fs> {
         }) {
             let output_id = OutputId::new(tx_id, i as u8);
             if (self.scanner)(output) {
-                address_table.insert(output.address(), output_id.clone())?;
+                address_table
+                    .insert(output.address(), output_id.clone())
+                    .map_err(BlockError::other)?;
             }
-            utxo_set.insert(output_id, output)?;
-            tx_table.insert(tx_id, block_hash)?;
+            utxo_set
+                .insert(output_id, output)
+                .map_err(BlockError::other)?;
+            tx_table
+                .insert(tx_id, block_hash)
+                .map_err(BlockError::other)?;
         }
         Ok(())
     }
@@ -385,17 +393,21 @@ where
             {
                 // Update the tip to the new metadata hash.
                 self.tip = Some(metadata.hash);
-                recovery_table.insert(MAIN_CHAIN_TIP_KEY, metadata.hash.to_vec())?;
+                recovery_table
+                    .insert(MAIN_CHAIN_TIP_KEY, metadata.hash.to_vec())
+                    .map_err(BlockError::other)?;
             }
 
-            metadata_table.insert(metadata.hash, metadata)?;
+            metadata_table
+                .insert(metadata.hash, metadata)
+                .map_err(BlockError::other)?;
         }
 
         if let Some(fs) = self.fs.try_as_ref() {
-            fs.commit()?;
+            fs.commit().map_err(BlockError::other)?;
         }
 
-        write_tx.commit()?;
+        write_tx.commit().map_err(BlockError::other)?;
         Ok(())
     }
     fn get_block_metadata(&'_ self, hash: &Hash) -> Option<Cow<'_, BlockMetadata>> {

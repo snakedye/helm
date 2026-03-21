@@ -114,9 +114,11 @@ impl From<TransactionError> for BlockError {
     }
 }
 
-impl<T: Error + 'static> From<T> for BlockError {
-    fn from(err: T) -> Self {
-        BlockError::Other(Box::new(err))
+impl Error for BlockError {}
+
+impl BlockError {
+    pub fn other(err: impl std::error::Error + 'static) -> Self {
+        Self::Other(Box::new(err))
     }
 }
 
