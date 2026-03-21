@@ -152,6 +152,34 @@ impl RpcClient {
             resp => Err(RpcError::UnexpectedResponse(resp)),
         }
     }
+
+    /// Request to sign a transaction and return the signature.
+    pub async fn sigall_transaction(&self, tx: Transaction) -> Result<Signature, RpcError> {
+        match self
+            .request(RpcRequest::SignTransaction {
+                inputs: tx.inputs.iter().map(|i| i.output_id()).collect(),
+                outputs: tx.outputs,
+            })
+            .await?
+        {
+            RpcResponse::Signature(signature) => Ok(signature),
+            resp => Err(RpcError::UnexpectedResponse(resp)),
+        }
+    }
+
+    /// Request to partially sign a transaction and return the signature.
+    pub async fn sigout_transaction(&self, tx: Transaction) -> Result<Signature, RpcError> {
+        match self
+            .request(RpcRequest::SignTransaction {
+                inputs: vec![],
+                outputs: tx.outputs,
+            })
+            .await?
+        {
+            RpcResponse::Signature(signature) => Ok(signature),
+            resp => Err(RpcError::UnexpectedResponse(resp)),
+        }
+    }
 }
 
 /// Represents a full node in the Eupp network.
@@ -562,6 +590,7 @@ impl<I: Send + Sync + 'static, M: Mempool + Send + Sync + 'static> EuppNode<I, M
                     .map(|meta| NodeInfo {
                         tip_hash: meta.hash,
                         tip_height: meta.height as u64,
+                        public_key: self.config.public_key(),
                         available_supply: meta.available_supply,
                         peers: swarm
                             .connected_peers()
@@ -651,6 +680,12 @@ impl<I: Send + Sync + 'static, M: Mempool + Send + Sync + 'static> EuppNode<I, M
                         e
                     ))),
                 }
+            }
+            RpcRequest::SignTransaction { inputs, outputs } => {
+                let signing_key = keypair(&self.config.secret_key());
+                let sighash = sighash(inputs.iter(), outputs.iter());
+                let signature = signing_key.sign(&sighash);
+                Ok(RpcResponse::Signature(signature.to_bytes()))
             }
         }
     }

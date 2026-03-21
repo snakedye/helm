@@ -12,6 +12,8 @@ pub use block::*;
 use const_hex as hex;
 pub use transaction::*;
 
+pub use ed25519_dalek::Signer;
+
 /// Like [`AsRef`], but returns `Option<&T>` instead of `&T`.
 pub trait TryAsRef<T: ?Sized> {
     fn try_as_ref(&self) -> Option<&T>;

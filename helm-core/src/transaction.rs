@@ -150,6 +150,9 @@ impl Input {
         self.witness = witness;
         self
     }
+    pub fn set_signature(&mut self, signature: Signature) {
+        self.signature = signature;
+    }
     pub fn sign(mut self, sk: &SecretKey, sighash: Hash) -> Self {
         let signing_key = SigningKey::from_bytes(sk);
         self.public_key = signing_key.verifying_key().to_bytes();

@@ -29,6 +29,12 @@ pub struct NodeInfo {
     pub tip_height: u64,
     /// The currently available supply of coins.
     pub available_supply: u64,
+    #[serde(
+        serialize_with = "serialize_to_hex",
+        deserialize_with = "deserialize_arr"
+    )]
+    /// The public key of the node.
+    pub public_key: PublicKey,
     /// The list of connected peers.
     pub peers: Vec<String>,
     #[serde(
@@ -155,6 +161,15 @@ pub enum RpcRequest {
     /// Expect a `TransactionHash` in the response on success.
     BroadcastTransaction { tx: Transaction },
 
+    /// Request to sign a transaction.
+    /// Expect a `Signature` in the response on success.
+    SignTransaction {
+        /// The outputs being spent.
+        inputs: Vec<OutputId>,
+        /// The outputs being created.
+        outputs: Vec<Output>,
+    },
+
     /// Broadcast a mined block to the network.
     BroadcastBlock { block: Block },
 
@@ -191,6 +206,13 @@ pub enum RpcResponse {
 
     /// The summary of a block.
     BlockSummary(BlockSummary),
+
+    #[serde(
+        serialize_with = "serialize_to_hex",
+        deserialize_with = "deserialize_arr"
+    )]
+    /// The signature of the signed transaction.
+    Signature(Signature),
 }
 
 /// Error returned by a request made with [`crate::RpcClient`].

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use const_hex as hex;
-use helm_core::{Hash, TransactionHash, commitment, keypair};
+use helm_core::{Hash, PublicKey, Signature, TransactionHash, commitment, keypair};
 use helm_core::{Input, Output, OutputId, Transaction, ledger::Query, sighash};
 use std::time::Duration;
 
@@ -19,10 +19,6 @@ struct Cli {
 enum Command {
     /// Send a P2PKH transaction to a recipient identified by their public key hash (address).
     SendTo {
-        /// The secret key to sign the transaction with (hex-encoded).
-        #[arg(long)]
-        secret_key: String,
-
         /// The public key hash (address/commitment) of the recipient (hex-encoded, 32 bytes).
         #[arg(long)]
         address: Option<String>,
@@ -54,14 +50,27 @@ fn base_url(peer: &str) -> String {
     peer.trim_end_matches('/').to_string()
 }
 
-fn cmd_send_to(peer: &str, secret_key: &str, address_hex: Option<&String>, amount: u64) {
+fn cmd_send_to(peer: &str, address_hex: Option<&String>, amount: u64) {
     let base = base_url(peer);
     let client = build_client();
 
+    let resp = client
+        .post(format!("{base}/info"))
+        .send()
+        .expect("Failed to fetch info");
+
+    let node_info_json: serde_json::Value =
+        resp.json().expect("Failed to parse node info response");
+
+    // Extract the 'public_key' field from the JSON response.
+    // This public key represents the public key of the remote node we are connected to.
+    let public_key: PublicKey = node_info_json["public_key"]
+        .as_str()
+        .map(|node_public_key_hex| hex::decode_to_array(node_public_key_hex))
+        .unwrap()
+        .expect("Node info response missing 'public_key' field or it's not a string");
+
     // Parse the secret key
-    let secret_key = hex::decode_to_array(secret_key).expect("Invalid hex for secret key");
-    let signing_key = keypair(&secret_key);
-    let public_key = signing_key.verifying_key().to_bytes();
     let data = [0_u8; 32];
     let self_address = commitment(&public_key, Some(data.as_slice()));
 
@@ -104,22 +113,29 @@ fn cmd_send_to(peer: &str, secret_key: &str, address_hex: Option<&String>, amoun
     let to_self = Output::new_v1(change, &public_key, &data);
     let new_outputs = vec![to_remote, to_self];
 
-    // Compute sighash and sign inputs
-    let sighash_val = sighash(utxos.clone().map(|(oid, _)| oid), &new_outputs);
-
     let inputs: Vec<Input> = utxos
         .clone()
-        .map(|(output_id, _)| {
-            Input::new_unsigned(*output_id).sign(signing_key.as_bytes(), sighash_val)
-        })
+        .map(|(output_id, _)| Input::new_unsigned(*output_id))
         .collect();
-    let tx = Transaction::new(inputs, new_outputs);
+    let mut tx = Transaction::new(inputs, new_outputs);
 
     let tx_hash = tx.hash();
     println!(
         "Constructed transaction with hash: 0x{}",
         hex::encode(tx_hash)
     );
+
+    // Sign the transaction
+    let signature = client
+        .post(format!("{base}/transactions/sign/all"))
+        .json(&tx)
+        .send()
+        .expect("Failed to sign transaction");
+
+    let signature: Signature = hex::decode_to_array(signature.text().unwrap()).unwrap();
+    for input in &mut tx.inputs {
+        input.set_signature(signature);
+    }
 
     // Broadcast
     let resp = client
@@ -195,11 +211,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::SendTo {
-            secret_key,
-            address,
-            amount,
-        } => cmd_send_to(&cli.peer, &secret_key, address.as_ref(), amount),
+        Command::SendTo { address, amount } => cmd_send_to(&cli.peer, address.as_ref(), amount),
         Command::Broadcast { tx } => cmd_broadcast(&cli.peer, &tx),
         Command::Info => cmd_info(&cli.peer),
     }
