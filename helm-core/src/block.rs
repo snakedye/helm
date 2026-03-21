@@ -506,9 +506,13 @@ mod tests {
     fn mining_transaction(new_supply: u64, tx_hash: Hash, sk: &SecretKey) -> Transaction {
         let output_id = OutputId::new(tx_hash, 0);
         let mut transaction = Transaction::new(vec![], vec![]);
-        transaction
-            .inputs
-            .push(Input::new_unsigned(output_id).sign(sk, [0; 32]));
+        transaction.inputs.push(
+            Input::builder()
+                .with_output_id(output_id)
+                .sign(sk, [0; 32])
+                .build()
+                .unwrap(),
+        );
         transaction.outputs.push(Output {
             version: Version::ZERO,
             amount: new_supply,
@@ -653,9 +657,13 @@ mod tests {
         // the genesis lead output (index 0).
         let sk: SecretKey = [1; 32];
         let mut transaction = Transaction::new(vec![], vec![]);
-        transaction
-            .inputs
-            .push(Input::new_unsigned(wrong_output_id).sign(&sk, [0; 32]));
+        transaction.inputs.push(
+            Input::builder()
+                .with_output_id(wrong_output_id)
+                .sign(&sk, [0; 32])
+                .build()
+                .unwrap(),
+        );
         transaction
             .outputs
             .push(Output::new_v0(1, &[0; 32], &[0; 32]));

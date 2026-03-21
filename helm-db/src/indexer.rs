@@ -632,7 +632,11 @@ mod tests {
         let out2 = Output::new_v0(99, &data, &data);
         let output_id = OutputId::new(tx_hash, 0);
         let sighash = sighash([&output_id; 2], [&out2]);
-        let input = Input::new_unsigned(output_id).sign(&[0; 32], sighash);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .sign(&[0; 32], sighash)
+            .build()
+            .unwrap();
         let tx2 = Transaction {
             inputs: vec![input; 2],
             outputs: vec![out2],
@@ -678,7 +682,11 @@ mod tests {
         let out2 = Output::new_v0(99, &data, &data);
         let output_id = OutputId::new(tx_hash, 0);
         let sighash = sighash([&output_id], [&out2]);
-        let input = Input::new_unsigned(output_id).sign(&[0; 32], sighash);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .sign(&[0; 32], sighash)
+            .build()
+            .unwrap();
         let tx2 = Transaction {
             inputs: vec![input],
             outputs: vec![out2],
@@ -722,7 +730,11 @@ mod tests {
         let out2 = Output::new_v0(99, &data, &data);
         let output_id = OutputId::new(tx1_hash, 0);
         let sighash1 = sighash([&output_id], [&out2]);
-        let input = Input::new_unsigned(output_id).sign(&[0; 32], sighash1);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .sign(&[0; 32], sighash1)
+            .build()
+            .unwrap();
         let tx2 = Transaction {
             inputs: vec![input],
             outputs: vec![out2],
@@ -736,7 +748,11 @@ mod tests {
         let out3 = Output::new_v0(98, &data, &data);
         let output_id = OutputId::new(tx2_hash, 0);
         let sighash2 = sighash([&output_id], [&out3]);
-        let input = Input::new_unsigned(output_id).sign(&[0; 32], sighash2);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .sign(&[0; 32], sighash2)
+            .build()
+            .unwrap();
         let tx3 = Transaction {
             inputs: vec![input],
             outputs: vec![out3],

@@ -137,27 +137,51 @@ pub struct Input {
     pub(crate) signature: Signature,
 }
 
-impl Input {
-    pub fn new_unsigned(output_id: OutputId) -> Self {
-        Self {
-            output_id,
-            signature: [0; 64],
+/// A builder for creating [`Input`].
+pub struct InputBuilder(Input);
+
+impl InputBuilder {
+    pub fn new() -> Self {
+        Self(Input {
+            output_id: OutputId::new([0; 32], 0),
             public_key: Default::default(),
             witness: vec![],
-        }
+            signature: [0; 64],
+        })
     }
-    pub fn with_witness(mut self, witness: Vec<u8>) -> Self {
-        self.witness = witness;
+    pub fn with_output_id(mut self, output_id: OutputId) -> Self {
+        self.0.output_id = output_id;
         self
     }
-    pub fn set_signature(&mut self, signature: Signature) {
-        self.signature = signature;
+    pub fn with_public_key(mut self, public_key: PublicKey) -> Self {
+        self.0.public_key = public_key;
+        self
+    }
+    pub fn with_witness(mut self, witness: Vec<u8>) -> Self {
+        self.0.witness = witness;
+        self
     }
     pub fn sign(mut self, sk: &SecretKey, sighash: Hash) -> Self {
         let signing_key = SigningKey::from_bytes(sk);
-        self.public_key = signing_key.verifying_key().to_bytes();
-        self.signature = signing_key.sign(&sighash).to_bytes();
+        self.0.public_key = signing_key.verifying_key().to_bytes();
+        self.0.signature = signing_key.sign(&sighash).to_bytes();
         self
+    }
+    pub fn build(self) -> Option<Input> {
+        if self.0.public_key == [0; 32] {
+            None
+        } else {
+            Some(self.0)
+        }
+    }
+}
+
+impl Input {
+    pub fn builder() -> InputBuilder {
+        InputBuilder::new()
+    }
+    pub fn set_signature(&mut self, signature: Signature) {
+        self.signature = signature;
     }
     pub fn output_id(&self) -> OutputId {
         self.output_id
@@ -691,10 +715,14 @@ mod tests {
 
     #[test]
     fn test_transaction_hash() {
-        let input = Input::new_unsigned(OutputId {
-            tx_hash: [1u8; 32],
-            index: 0,
-        });
+        let input = Input::builder()
+            .with_output_id(OutputId {
+                tx_hash: [1u8; 32],
+                index: 0,
+            })
+            .with_public_key([1; 32])
+            .build()
+            .unwrap();
         let output = Output::new_v1(10, &[0; 32], &[3u8; 32]);
         let tx = Transaction {
             inputs: vec![input.clone()],
@@ -745,8 +773,11 @@ mod tests {
         ]; // total output: 90
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[11u8; 32]);
         let sighash = sighash(&[utxo_id], &new_outputs);
-        let input =
-            Input::new_unsigned(utxo_id).sign(signing_key.verifying_key().as_bytes(), sighash);
+        let input = Input::builder()
+            .with_output_id(utxo_id)
+            .sign(signing_key.verifying_key().as_bytes(), sighash)
+            .build()
+            .unwrap();
 
         let spending_tx = Transaction {
             inputs: vec![input],
@@ -772,7 +803,13 @@ mod tests {
         );
 
         let spending_tx = Transaction {
-            inputs: vec![Input::new_unsigned(utxo_id)],
+            inputs: vec![
+                Input::builder()
+                    .with_output_id(utxo_id)
+                    .with_public_key([1; 32])
+                    .build()
+                    .unwrap(),
+            ],
             outputs: vec![Output::new_v1(99, &[0u8; 32], &[0u8; 32])],
         };
 
@@ -815,7 +852,13 @@ mod tests {
         let sighash = sighash(&[utxo_id], &new_outputs);
 
         let spending_tx = Transaction {
-            inputs: vec![Input::new_unsigned(utxo_id).sign(signing_key.as_bytes(), sighash)],
+            inputs: vec![
+                Input::builder()
+                    .with_output_id(utxo_id)
+                    .sign(signing_key.as_bytes(), sighash)
+                    .build()
+                    .unwrap(),
+            ],
             outputs: new_outputs,
         };
 
@@ -851,7 +894,11 @@ mod tests {
             commitment: mask,
         }];
         let sighash = sighash(&[utxo_id], &new_outputs);
-        let input = Input::new_unsigned(utxo_id).sign(&[11u8; 32], sighash);
+        let input = Input::builder()
+            .with_output_id(utxo_id)
+            .sign(&[11u8; 32], sighash)
+            .build()
+            .unwrap();
 
         let spending_tx = Transaction {
             inputs: vec![input],
@@ -880,7 +927,11 @@ mod tests {
 
         let new_outputs = vec![Output::new_v1(amount, &[0u8; 32], &script_data)];
         let sighash = sighash(&[utxo_id], &new_outputs);
-        let input = Input::new_unsigned(utxo_id).sign(signing_key.as_bytes(), sighash);
+        let input = Input::builder()
+            .with_output_id(utxo_id)
+            .sign(signing_key.as_bytes(), sighash)
+            .build()
+            .unwrap();
 
         let spending_tx = Transaction {
             inputs: vec![input],
@@ -905,7 +956,13 @@ mod tests {
                 index: i as u8,
             };
             let sighash = sighash(&[utxo_id], &[]);
-            inputs.push(Input::new_unsigned(utxo_id).sign(&[11u8; 32], sighash));
+            inputs.push(
+                Input::builder()
+                    .with_output_id(utxo_id)
+                    .sign(&[11u8; 32], sighash)
+                    .build()
+                    .unwrap(),
+            );
         }
 
         let spending_tx = Transaction {
@@ -928,7 +985,13 @@ mod tests {
             .collect();
 
         let spending_tx = Transaction {
-            inputs: vec![Input::new_unsigned(OutputId::new([1u8; 32], 0))],
+            inputs: vec![
+                Input::builder()
+                    .with_output_id(OutputId::new([1u8; 32], 0))
+                    .with_public_key([1; 32])
+                    .build()
+                    .unwrap(),
+            ],
             outputs,
         };
 
@@ -962,9 +1025,12 @@ mod tests {
 
         let new_outputs = vec![Output::new_v1(amount, &[0u8; 32], &[0u8; 32])];
         let sighash = sighash(&[utxo_id], &new_outputs);
-        let input = Input::new_unsigned(utxo_id)
+        let input = Input::builder()
+            .with_output_id(utxo_id)
             .with_witness(witness)
-            .sign(signing_key.as_bytes(), sighash);
+            .sign(signing_key.as_bytes(), sighash)
+            .build()
+            .unwrap();
 
         let spending_tx = Transaction {
             inputs: vec![input],
@@ -991,9 +1057,12 @@ mod tests {
 
         let new_outputs = vec![Output::new_v1(amount, &[0u8; 32], &[0u8; 32])];
         let sighash = sighash(&[utxo_id], &new_outputs);
-        let input = Input::new_unsigned(utxo_id)
+        let input = Input::builder()
+            .with_output_id(utxo_id)
             .with_witness(witness)
-            .sign(signing_key.as_bytes(), sighash);
+            .sign(signing_key.as_bytes(), sighash)
+            .build()
+            .unwrap();
 
         let spending_tx = Transaction {
             inputs: vec![input],
@@ -1022,9 +1091,12 @@ mod tests {
         let sighash = sighash(&[utxo_id], &new_outputs);
 
         // Create an input with an invalid signature
-        let mut input = Input::new_unsigned(utxo_id)
+        let mut input = Input::builder()
+            .with_output_id(utxo_id)
             .with_witness(witness)
-            .sign(signing_key.as_bytes(), sighash);
+            .sign(signing_key.as_bytes(), sighash)
+            .build()
+            .unwrap();
         input.signature[0] ^= 0xFF; // Corrupt the signature to make it invalid
 
         let spending_tx = Transaction {

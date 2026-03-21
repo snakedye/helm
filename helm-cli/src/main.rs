@@ -1,7 +1,8 @@
 use clap::{Parser, Subcommand};
 use const_hex as hex;
-use helm_core::{Hash, PublicKey, Signature, TransactionHash, commitment, keypair};
-use helm_core::{Input, Output, OutputId, Transaction, ledger::Query, sighash};
+use helm_core::{Hash, Signature, TransactionHash, commitment};
+use helm_core::{Input, Output, OutputId, Transaction, ledger::Query};
+use helm_net::protocol::NodeInfo;
 use std::time::Duration;
 
 /// A CLI for interacting with the Eupp node via its HTTP REST API.
@@ -54,21 +55,14 @@ fn cmd_send_to(peer: &str, address_hex: Option<&String>, amount: u64) {
     let base = base_url(peer);
     let client = build_client();
 
+    // Fetch node info to get the public key
     let resp = client
-        .post(format!("{base}/info"))
+        .get(format!("{base}/info"))
         .send()
         .expect("Failed to fetch info");
 
-    let node_info_json: serde_json::Value =
-        resp.json().expect("Failed to parse node info response");
-
-    // Extract the 'public_key' field from the JSON response.
-    // This public key represents the public key of the remote node we are connected to.
-    let public_key: PublicKey = node_info_json["public_key"]
-        .as_str()
-        .map(|node_public_key_hex| hex::decode_to_array(node_public_key_hex))
-        .unwrap()
-        .expect("Node info response missing 'public_key' field or it's not a string");
+    let node_info: NodeInfo = resp.json().expect("Failed to parse node info response");
+    let public_key = node_info.public_key;
 
     // Parse the secret key
     let data = [0_u8; 32];
@@ -115,7 +109,13 @@ fn cmd_send_to(peer: &str, address_hex: Option<&String>, amount: u64) {
 
     let inputs: Vec<Input> = utxos
         .clone()
-        .map(|(output_id, _)| Input::new_unsigned(*output_id))
+        .map(|(output_id, _)| {
+            Input::builder()
+                .with_output_id(*output_id)
+                .with_public_key(public_key)
+                .build()
+                .unwrap()
+        })
         .collect();
     let mut tx = Transaction::new(inputs, new_outputs);
 
@@ -126,13 +126,17 @@ fn cmd_send_to(peer: &str, address_hex: Option<&String>, amount: u64) {
     );
 
     // Sign the transaction
-    let signature = client
+    let resp = client
         .post(format!("{base}/transactions/sign/all"))
         .json(&tx)
         .send()
         .expect("Failed to sign transaction");
-
-    let signature: Signature = hex::decode_to_array(signature.text().unwrap()).unwrap();
+    let signature: Signature = resp
+        .text()
+        .inspect(|t| println!("Signature: {t}"))
+        .map(hex::decode_to_array)
+        .unwrap()
+        .unwrap();
     for input in &mut tx.inputs {
         input.set_signature(signature);
     }
