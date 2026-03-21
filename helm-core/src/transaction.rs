@@ -139,8 +139,12 @@ pub struct Input {
 
 /// A builder for creating [`Input`].
 pub struct InputBuilder(Input);
-
 impl InputBuilder {
+    /// Creates a new `InputBuilder` with default values.
+    ///
+    /// The `output_id` is initialized to a zero hash and index 0.
+    /// The `public_key` and `signature` are default (zeroed arrays).
+    /// The `witness` is an empty vector.
     pub fn new() -> Self {
         Self(Input {
             output_id: OutputId::new([0; 32], 0),
@@ -149,24 +153,42 @@ impl InputBuilder {
             signature: [0; 64],
         })
     }
+    /// Sets the output ID for the input.
+    ///
+    /// This specifies which unspent transaction output (UTXO) this input is spending.
     pub fn with_output_id(mut self, output_id: OutputId) -> Self {
         self.0.output_id = output_id;
         self
     }
+    /// Sets the public key for the input.
+    ///
+    /// This public key is used to verify the signature against the transaction's sighash.
     pub fn with_public_key(mut self, public_key: PublicKey) -> Self {
         self.0.public_key = public_key;
         self
     }
+    /// Sets the witness data for the input.
+    ///
+    /// Witness data is used for SegWit-style transactions and typically contains
+    /// scripts or other data required for validation.
     pub fn with_witness(mut self, witness: Vec<u8>) -> Self {
         self.0.witness = witness;
         self
     }
+    /// Signs the input with the given secret key and transaction sighash.
+    ///
+    /// This method sets the `public_key` from the `SecretKey` and generates
+    /// the `signature` for the provided `sighash`.
     pub fn sign(mut self, sk: &SecretKey, sighash: Hash) -> Self {
         let signing_key = SigningKey::from_bytes(sk);
         self.0.public_key = signing_key.verifying_key().to_bytes();
         self.0.signature = signing_key.sign(&sighash).to_bytes();
         self
     }
+    /// Builds the `Input` from the builder.
+    ///
+    /// Returns `Some(Input)` if the public key has been set (i.e., is not all zeros),
+    /// otherwise returns `None`, indicating an incomplete input.
     pub fn build(self) -> Option<Input> {
         if self.0.public_key == [0; 32] {
             None
@@ -177,12 +199,18 @@ impl InputBuilder {
 }
 
 impl Input {
+    /// Returns a new `InputBuilder` to construct an `Input`.
     pub fn builder() -> InputBuilder {
         InputBuilder::new()
     }
+    /// Sets the signature for the input.
+    ///
+    /// This is typically used when the signature is generated separately
+    /// or for modifying an existing input.
     pub fn set_signature(&mut self, signature: Signature) {
         self.signature = signature;
     }
+    /// Returns the `OutputId` that this input is spending.
     pub fn output_id(&self) -> OutputId {
         self.output_id
     }
