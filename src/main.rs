@@ -7,7 +7,7 @@ use helm_core::{
     miner,
 };
 use helm_db::{FileStore, RedbIndexer};
-use helm_net::{Config, EuppNode, RpcClient, SimpleMempool, SyncHandle};
+use helm_net::{Config, HelmNode, RpcClient, SyncHandle, mempool::SimpleMempool};
 use indexer::NodeStore;
 use rand::{TryRngCore, rngs::OsRng};
 use std::{net::SocketAddr, time::Duration};
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mempool = SimpleMempool::default();
 
     // Create the EuppNode (do not block the current task yet)
-    let node = EuppNode::new(config.clone(), ledger, mempool);
+    let node = HelmNode::new(config.clone(), ledger, mempool);
     let sync_handle = node.sync_handle();
 
     // Run the node in the current task. If it returns an error, log it.
@@ -134,7 +134,7 @@ async fn mining_loop(
     const BATCH_SIZE: usize = 10_000;
 
     loop {
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
         if sync.is_syncing() {
             debug!("Node is syncing; skipping mining iteration");
             continue;
