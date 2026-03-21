@@ -1,7 +1,7 @@
 #[cfg(any(feature = "config", feature = "full"))]
 mod config;
 #[cfg(feature = "full")]
-mod net;
+mod node;
 #[cfg(any(feature = "protocol", feature = "full"))]
 pub mod protocol;
 
@@ -9,4 +9,4 @@ pub mod protocol;
 pub use config::Config;
 
 #[cfg(feature = "full")]
-pub use net::*;
+pub use node::*;

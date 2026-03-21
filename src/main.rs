@@ -7,7 +7,7 @@ use helm_core::{
     miner,
 };
 use helm_db::{FileStore, RedbIndexer};
-use helm_net::{Config, EuppNode, RpcClient, SyncHandle, mempool::SimpleMempool};
+use helm_net::{Config, HelmNode, RpcClient, SyncHandle, mempool::SimpleMempool};
 use indexer::NodeStore;
 use rand::{TryRngCore, rngs::OsRng};
 use std::{net::SocketAddr, time::Duration};
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mempool = SimpleMempool::default();
 
     // Create the EuppNode (do not block the current task yet)
-    let node = EuppNode::new(config.clone(), ledger, mempool);
+    let node = HelmNode::new(config.clone(), ledger, mempool);
     let sync_handle = node.sync_handle();
 
     // Run the node in the current task. If it returns an error, log it.

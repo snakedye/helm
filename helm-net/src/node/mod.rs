@@ -17,7 +17,7 @@ use libp2p::{
 };
 use tracing::{debug, error, info};
 
-use crate::{config::Config, net::behavior::*, protocol::*};
+use crate::{config::Config, node::behavior::*, protocol::*};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Duration;
@@ -175,8 +175,8 @@ impl RpcClient {
     }
 }
 
-/// Represents a full node in the Eupp network.
-pub struct EuppNode<I, M: Mempool> {
+/// Represents a full node in the Helm network.
+pub struct HelmNode<I, M: Mempool> {
     /// The indexer that maintains the blockchain state.
     indexer: Arc<RwLock<I>>,
 
@@ -196,7 +196,7 @@ pub struct EuppNode<I, M: Mempool> {
     config: Config,
 }
 
-impl<I: Send + Sync + 'static, M: Mempool + Send + Sync + 'static> EuppNode<I, M> {
+impl<I: Send + Sync + 'static, M: Mempool + Send + Sync + 'static> HelmNode<I, M> {
     /// Creates a new instance of `EuppNode` with the given ledger and mempool.
     pub fn new(config: Config, indexer: I, mempool: M) -> Self {
         Self {
