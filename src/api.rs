@@ -50,6 +50,8 @@ pub fn router(state: RpcClient) -> Router {
         .route("/outputs/search", post(search_outputs))
         .route("/blocks/{hash}", get(get_block))
         .route("/transactions", post(send_raw_tx))
+        .route("/transactions/sign/all", post(sign_all_transaction))
+        .route("/transactions/sign/outputs", post(sign_outputs_transaction))
         .with_state(state)
 }
 
@@ -67,7 +69,7 @@ async fn get_node_info(
 /// Accepts optional leading "0x".
 fn parse_hex_hash<const N: usize>(s: &str) -> Result<[u8; N], RpcError> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    const_hex::decode_to_array(s).map_err(|e| RpcError::BadRequest(format!("invalid hash: {e}")))
+    const_hex::decode_to_array(s).map_err(|e| RpcError::BadRequest(e.to_string()))
 }
 
 async fn get_confirmations(
@@ -100,6 +102,22 @@ async fn get_block(
 ) -> Result<Json<BlockSummary>, ApiError> {
     let hash = parse_hex_hash(&block_hash_hex)?;
     Ok(Json(client.get_block_by_hash(hash).await?))
+}
+
+/// Sign all inputs and outputs of a transaction.
+async fn sign_all_transaction(
+    State(client): State<RpcClient>,
+    Json(tx): Json<Transaction>,
+) -> Result<String, ApiError> {
+    Ok(const_hex::encode(client.sigall_transaction(tx).await?))
+}
+
+/// Sign only the outputs of a transaction.
+async fn sign_outputs_transaction(
+    State(client): State<RpcClient>,
+    Json(tx): Json<Transaction>,
+) -> Result<String, ApiError> {
+    Ok(const_hex::encode(client.sigout_transaction(tx).await?))
 }
 
 /// Broadcast a transaction (create a new transaction resource).

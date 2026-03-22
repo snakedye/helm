@@ -687,7 +687,13 @@ mod tests {
 
     fn default_transaction() -> Transaction {
         Transaction {
-            inputs: vec![Input::new_unsigned(OutputId::new([0; 32], 0))],
+            inputs: vec![
+                Input::builder()
+                    .with_output_id(OutputId::new([0; 32], 0))
+                    .with_public_key([1; 32])
+                    .build()
+                    .unwrap(),
+            ],
             outputs: vec![],
         }
     }
@@ -768,7 +774,11 @@ mod tests {
     #[test]
     fn test_op_in_amt() {
         let output_id = OutputId::new(TransactionHash::default(), 0);
-        let input = Input::new_unsigned(output_id);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .with_public_key([1; 32])
+            .build()
+            .unwrap();
         let utxo = Output {
             version: Version::ONE,
             amount: 100,
@@ -796,7 +806,11 @@ mod tests {
             commitment: [0; 32],
             data,
         };
-        let input = Input::new_unsigned(output_id);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .with_public_key([1; 32])
+            .build()
+            .unwrap();
         let mut indexer = MockLedger::default();
         indexer.utxos.insert(output_id, utxo);
 
@@ -818,7 +832,11 @@ mod tests {
             commitment,
             data: [0; 32],
         };
-        let input = Input::new_unsigned(output_id);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .with_public_key([1; 32])
+            .build()
+            .unwrap();
         let mut indexer = MockLedger::default();
         indexer.utxos.insert(output_id, output);
 
@@ -949,7 +967,11 @@ mod tests {
         });
 
         let output_id = OutputId::new(TransactionHash::default(), 0);
-        let input = Input::new_unsigned(output_id);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .with_public_key([1; 32])
+            .build()
+            .unwrap();
         let utxo = Output {
             version: Version::ONE,
             amount: 100,
@@ -1014,7 +1036,11 @@ mod tests {
         let output_id = OutputId::new(tx_hash, 0);
 
         let sighash = sighash(&[output_id], []);
-        let input = Input::new_unsigned(output_id).sign(signing_key.as_bytes(), sighash);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .sign(signing_key.as_bytes(), sighash)
+            .build()
+            .unwrap();
         let transaction = Transaction {
             inputs: vec![input],
             outputs: vec![],
@@ -1066,7 +1092,11 @@ mod tests {
             commitment,
             data,
         };
-        let input = Input::new_unsigned(output_id);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .with_public_key([1; 32])
+            .build()
+            .unwrap();
         let transaction = Transaction {
             inputs: vec![input],
             outputs: vec![],
@@ -1215,7 +1245,11 @@ mod tests {
             Output::new_v1(100, &verifying_key.to_bytes(), &[0; 32]),
         );
         let sighash = sighash(&[output_id], []);
-        let input = Input::new_unsigned(output_id).sign(signing_key.as_bytes(), sighash);
+        let input = Input::builder()
+            .with_output_id(output_id)
+            .sign(signing_key.as_bytes(), sighash)
+            .build()
+            .unwrap();
         let transaction = Transaction {
             inputs: vec![input],
             outputs: vec![],
