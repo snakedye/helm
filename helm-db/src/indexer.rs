@@ -6,7 +6,7 @@ use std::{
 
 use ethnum::U256;
 use helm_core::{
-    ledger::{BlockMetadata, Cursor, IndexerExt, Ledger},
+    ledger::{BlockMetadata, Cursor, IndexerExt, Ledger, OutputEntry},
     mask_difficulty, *,
 };
 use redb::{
@@ -423,7 +423,7 @@ where
         let table = read_tx.open_table(UTXO_TABLE).ok()?;
         self.get(&table, output_id, |output| output)
     }
-    fn query_outputs(&self, query: &helm_core::ledger::Query) -> Vec<(OutputId, Output)> {
+    fn query_outputs(&self, query: &helm_core::ledger::Query) -> Vec<OutputEntry> {
         let read_tx = self.db.begin_read().unwrap();
         let address_table = read_tx.open_multimap_table(ADDRESS_TABLE).unwrap();
         let utxo_table = read_tx.open_table(UTXO_TABLE).unwrap();
@@ -440,14 +440,14 @@ where
                         .get(output_id)
                         .ok()
                         .flatten()
-                        .map(move |value| (output_id, value.value()))
+                        .map(move |value| (output_id, value.value()).into())
                 })
                 .collect(),
             ledger::Query::TransactionID(tx_hash) => utxo_table
                 .range(OutputId::new(*tx_hash, 0)..OutputId::new(*tx_hash, 255))
                 .map(|iter| {
                     iter.filter_map(|output| output.ok())
-                        .map(|(output_id, output)| (output_id.value(), output.value()))
+                        .map(|(output_id, output)| (output_id.value(), output.value()).into())
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -565,9 +565,9 @@ mod tests {
         let q = Query::Addresses(vec![*address]);
         let res = indexer.query_outputs(&q);
         // We expect at least one UTXO for our address
-        let (id, out) = res.first().unwrap();
+        let OutputEntry { id, output } = res.first().unwrap();
         assert_eq!(id.tx_hash, txid);
-        assert_eq!(out.address(), address);
+        assert_eq!(output.address(), address);
     }
 
     #[test]

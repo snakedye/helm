@@ -607,7 +607,7 @@ mod tests {
     use crate::{
         Hash, Version,
         block::{Block, BlockError},
-        ledger::BlockMetadata,
+        ledger::{BlockMetadata, OutputEntry},
         transaction::{Input, Output, OutputId, TransactionHash},
     };
     use ed25519_dalek::{Signer, SigningKey};
@@ -635,7 +635,7 @@ mod tests {
             self.utxos.get(id).copied()
         }
 
-        fn query_outputs(&self, _query: &crate::ledger::Query) -> Vec<(OutputId, Output)> {
+        fn query_outputs(&self, _query: &crate::ledger::Query) -> Vec<OutputEntry> {
             unimplemented!()
         }
 

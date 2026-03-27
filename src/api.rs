@@ -5,7 +5,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use helm_core::{Output, OutputId, Transaction, ledger::Query};
+use helm_core::{
+    Transaction,
+    ledger::{OutputEntry, Query},
+};
 use helm_net::protocol::{self as protocol, RpcError};
 use helm_net::{RpcClient, protocol::BlockSummary};
 use serde::Serialize;
@@ -90,7 +93,7 @@ async fn get_block_from_tx_id(
 async fn search_outputs(
     State(client): State<RpcClient>,
     Json(query): Json<Query>,
-) -> Result<Json<Vec<(OutputId, Output)>>, ApiError> {
+) -> Result<Json<Vec<OutputEntry>>, ApiError> {
     Ok(Json(client.get_outputs(query).await?))
 }
 

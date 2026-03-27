@@ -11,7 +11,7 @@
 
 use ethnum::U256;
 use helm_core::{
-    ledger::{BlockMetadata, Query},
+    ledger::{BlockMetadata, OutputEntry, Query},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -186,8 +186,8 @@ pub enum RpcResponse {
     /// The number of confirmations for a given transaction hash.
     Confirmations(u64),
 
-    /// All matched UTXOs in one response: pairs of (OutputId, Output).
-    Outputs(Vec<(OutputId, Output)>),
+    /// A list of matched UTXOs.
+    Outputs(Vec<OutputEntry>),
 
     /// The hash of the broadcasted transaction.
     TransactionHash(TransactionHash),

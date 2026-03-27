@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
 use const_hex as hex;
 use helm_core::{Hash, TransactionHash, commitment, keypair};
-use helm_core::{Input, Output, OutputId, Transaction, ledger::Query, sighash};
+use helm_core::{
+    Input, Output, Transaction,
+    ledger::{OutputEntry, Query},
+    sighash,
+};
 use std::time::Duration;
 
 // ============================================================================
@@ -110,9 +114,9 @@ fn cmd_send_to(peer: &str, secret_key: &str, address_hex: Option<&String>, amoun
         panic!("Failed to fetch UTXOs: {}", resp.status());
     }
 
-    let outputs: Vec<(OutputId, Output)> = resp.json().expect("Failed to parse outputs response");
+    let outputs: Vec<OutputEntry> = resp.json().expect("Failed to parse outputs response");
     let utxos = outputs.iter().take(255);
-    let balance: u64 = utxos.clone().map(|(_, output)| output.amount()).sum();
+    let balance: u64 = utxos.clone().map(|entry| entry.output.amount()).sum();
 
     print_section("Wallet Information");
     print_entry("Address", &hex::encode_prefixed(self_address));
@@ -134,13 +138,13 @@ fn cmd_send_to(peer: &str, secret_key: &str, address_hex: Option<&String>, amoun
     let new_outputs = vec![to_remote, to_self];
 
     // --- Sign inputs ---
-    let sighash_val = sighash(utxos.clone().map(|(oid, _)| oid), &new_outputs);
+    let sighash_val = sighash(utxos.clone().map(|entry| &entry.id), &new_outputs);
 
     let inputs: Vec<Input> = utxos
         .clone()
-        .map(|(output_id, _)| {
+        .map(|entry| {
             Input::builder()
-                .with_output_id(*output_id)
+                .with_output_id(*&entry.id)
                 .sign(signing_key.as_bytes(), sighash_val)
                 .build()
                 .unwrap()

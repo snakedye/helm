@@ -414,7 +414,7 @@ mod tests {
     use crate::{
         SecretKey, Version,
         block::BlockError,
-        ledger::{BlockMetadata, Indexer, Query},
+        ledger::{BlockMetadata, Indexer, OutputEntry, Query},
         transaction::{Input, OutputId},
     };
     use ethnum::U256;
@@ -475,7 +475,7 @@ mod tests {
             self.utxos.get(id).copied()
         }
 
-        fn query_outputs(&self, _query: &Query) -> Vec<(OutputId, Output)> {
+        fn query_outputs(&self, _query: &Query) -> Vec<OutputEntry> {
             unimplemented!()
         }
 

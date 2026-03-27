@@ -158,7 +158,7 @@ async fn mining_loop(
                                 &secret_key,
                                 &block_summary.hash,
                                 &block_summary.lead_tx_hash,
-                                &outputs[0].1,
+                                &outputs[0].output,
                                 Some(&mask),
                                 start..start + BATCH_SIZE,
                             )

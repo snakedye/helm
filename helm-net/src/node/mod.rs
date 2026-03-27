@@ -4,7 +4,7 @@ pub mod mempool;
 use const_hex as hex;
 use ethnum::U256;
 use helm_core::{
-    ledger::{Indexer, IndexerExt, Ledger, LedgerExt, Query},
+    ledger::{Indexer, IndexerExt, Ledger, LedgerExt, OutputEntry, Query},
     *,
 };
 use mempool::*;
@@ -87,7 +87,7 @@ impl RpcClient {
     }
 
     /// Query UTXOs matching `Query`.
-    pub async fn get_outputs(&self, query: Query) -> Result<Vec<(OutputId, Output)>, RpcError> {
+    pub async fn get_outputs(&self, query: Query) -> Result<Vec<OutputEntry>, RpcError> {
         match self.request(RpcRequest::GetOutputs { query }).await? {
             RpcResponse::Outputs(outputs) => Ok(outputs),
             resp => Err(RpcError::UnexpectedResponse(resp)),

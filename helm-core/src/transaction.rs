@@ -696,7 +696,7 @@ mod tests {
             self.utxos.get(id).copied()
         }
 
-        fn query_outputs(&self, _query: &Query) -> Vec<(OutputId, Output)> {
+        fn query_outputs(&self, _query: &Query) -> Vec<OutputEntry> {
             unimplemented!()
         }
 
