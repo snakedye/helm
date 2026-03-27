@@ -318,6 +318,21 @@ mod tests {
     }
 
     #[test]
+    fn scan_clone_macro_with_pragma() {
+        let bytes = [OP_CLONE, 2, OP_PRAGMA, OP_TRUE, OP_FALSE, OP_ENDPRAGMA];
+        let collected: Vec<Op> = Scanner::new(&bytes).flatten().collect();
+        assert_eq!(
+            collected,
+            vec![
+                Op::PushByte(1),
+                Op::PushByte(0),
+                Op::PushByte(1),
+                Op::PushByte(0),
+            ]
+        );
+    }
+
+    #[test]
     fn scan_pragma_without_end_returns_error() {
         let bytes = [OP_PRAGMA, OP_TRUE];
         let mut s = Scanner::new(&bytes);
