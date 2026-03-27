@@ -65,6 +65,10 @@ pub mod r#const {
     pub const OP_RETURN: u8 = 0x81; // Immediately terminates the script.
     pub const OP_IF: u8 = 0x82; // Executes subsequent code only if the top item is non-zero.
     pub const OP_END_IF: u8 = 0x83; // Marks the end of an if block.
+
+    // Register Operations
+    pub const OP_LOAD: u8 = 0x90; // Pushes the value stored in a register onto the stack (register index follows).
+    pub const OP_STORE: u8 = 0x91; // Pops the top stack value and stores it in a register (register index follows).
 }
 
 // Re-export the constants so existing imports like `use crate::core::vm::op::OP_TRUE`
@@ -162,6 +166,16 @@ pub enum Op<'a> {
     /// Mark the end of an if block.
     EndIf,
 
+    // Register Operations
+    /// Pushes the value stored in the given register onto the stack.
+    ///
+    /// Encoding: `[OP_LOAD][register: u8]`.
+    Load(u8),
+    /// Pops the top stack value and stores it in the given register.
+    ///
+    /// Encoding: `[OP_STORE][register: u8]`.
+    Store(u8),
+
     // Sighash Operations
     /// Pushes the sighash for all inputs and outputs onto the stack.
     SighashAll,
@@ -235,6 +249,8 @@ impl core::convert::TryFrom<u8> for Op<'_> {
             OP_SIGHASH_OUT => Ok(Op::SighashOut),
             OP_PUSH_WITNESS => Ok(Op::PushWitness),
             OP_END_IF => Ok(Op::EndIf),
+            OP_LOAD => Ok(Op::Load(0)), // placeholder; Scanner must read 1 byte after opcode
+            OP_STORE => Ok(Op::Store(0)), // placeholder; Scanner must read 1 byte after opcode
             OP_SPLIT => Ok(Op::Split(0)),
             OP_READ_U32 => Ok(Op::ReadU32),
             OP_READ_U64 => Ok(Op::ReadU64),
@@ -285,6 +301,8 @@ impl From<Op<'_>> for u8 {
             Op::If => OP_IF,
             Op::SighashAll => OP_SIGHASH_ALL,
             Op::EndIf => OP_END_IF,
+            Op::Load(_) => OP_LOAD,
+            Op::Store(_) => OP_STORE,
             Op::SighashOut => OP_SIGHASH_OUT,
             Op::PushWitness => OP_PUSH_WITNESS,
             Op::Split(_) => OP_SPLIT,
@@ -333,6 +351,8 @@ impl<'a> core::fmt::Display for Op<'a> {
             Op::Return => write!(f, "Return"),
             Op::If => write!(f, "If"),
             Op::EndIf => write!(f, "EndIf"),
+            Op::Load(reg) => write!(f, "Load({})", reg),
+            Op::Store(reg) => write!(f, "Store({})", reg),
             Op::SighashAll => write!(f, "SighashAll"),
             Op::SighashOut => write!(f, "SighashOut"),
             Op::PushWitness => write!(f, "PushWitness"),
@@ -390,6 +410,8 @@ mod tests {
             Op::ReadU32,
             Op::ReadByte,
             Op::SelfHeight,
+            Op::Load(0),
+            Op::Store(0),
         ];
 
         for &op in &all {
