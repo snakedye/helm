@@ -1302,7 +1302,6 @@ dependencies = [
  "clap",
  "const-hex",
  "helm-core",
- "helm-net",
  "reqwest",
  "serde_json",
 ]

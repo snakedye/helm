@@ -145,34 +145,6 @@ impl RpcClient {
             resp => Err(RpcError::UnexpectedResponse(resp)),
         }
     }
-
-    /// Request to sign a transaction and return the signature.
-    pub async fn sigall_transaction(&self, tx: Transaction) -> Result<Signature, RpcError> {
-        match self
-            .request(RpcRequest::SignTransaction {
-                inputs: tx.inputs.iter().map(|i| i.output_id()).collect(),
-                outputs: tx.outputs,
-            })
-            .await?
-        {
-            RpcResponse::Signature(signature) => Ok(signature),
-            resp => Err(RpcError::UnexpectedResponse(resp)),
-        }
-    }
-
-    /// Request to partially sign a transaction and return the signature.
-    pub async fn sigout_transaction(&self, tx: Transaction) -> Result<Signature, RpcError> {
-        match self
-            .request(RpcRequest::SignTransaction {
-                inputs: vec![],
-                outputs: tx.outputs,
-            })
-            .await?
-        {
-            RpcResponse::Signature(signature) => Ok(signature),
-            resp => Err(RpcError::UnexpectedResponse(resp)),
-        }
-    }
 }
 
 /// Represents a full node in the Helm network.
@@ -670,12 +642,6 @@ impl<I: Send + Sync + 'static, M: Mempool + Send + Sync + 'static> HelmNode<I, M
                     }
                     Err(err) => Err(RpcError::BadRequest(err.to_string())),
                 }
-            }
-            RpcRequest::SignTransaction { inputs, outputs } => {
-                let signing_key = keypair(&self.config.secret_key());
-                let sighash = sighash(inputs.iter(), outputs.iter());
-                let signature = signing_key.sign(&sighash);
-                Ok(RpcResponse::Signature(signature.to_bytes()))
             }
         }
     }
