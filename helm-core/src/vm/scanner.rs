@@ -16,7 +16,7 @@ use super::op::{
     OP_VERIFY, OP_VERIFYSIG, Op,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 /// An iterator that reads opcodes (and their payloads) from a byte slice.
 pub struct Scanner<'a> {
     bytes: &'a [u8],
@@ -58,6 +58,12 @@ impl<'a> Scanner<'a> {
         let (body, rest) = self.bytes.split_at(end);
         self.bytes = rest.split_first()?.1;
         Some(body)
+    }
+}
+
+impl<'a> std::fmt::Debug for Scanner<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.into_iter()).finish()
     }
 }
 
