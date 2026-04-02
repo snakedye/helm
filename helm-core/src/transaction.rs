@@ -628,7 +628,7 @@ mod tests {
     use crate::{
         Hash,
         block::{Block, BlockError},
-        ledger::{BlockMetadata, Indexer, Query},
+        ledger::{BlockMetadata, Indexer, OutputEntry, Query},
         vm::{p2pkh, p2wsh},
     };
     use blake2::Blake2s256;
